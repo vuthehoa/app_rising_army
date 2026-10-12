@@ -4,7 +4,6 @@ import 'support/built_camp.dart';
 
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
-import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/dev_mode.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
@@ -85,7 +84,8 @@ void main() {
         expect(s.buildings[Building.barracks], 2);
 
         final slots = GameRules.freeSlotIndices(s);
-        final type = buildableFacilities.first;
+        final type = FacilityType
+            .gravestone; // trại dựng sẵn đã có ba công trình đầu tiên
         expect(GameRules.buildFacility(s, type, slots.first).ok, isTrue);
 
         final cand = s.candidates.first;

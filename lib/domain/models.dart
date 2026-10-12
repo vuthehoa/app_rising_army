@@ -1,13 +1,17 @@
 import 'identity.dart';
 
-enum Res { food, coins, wood, iron }
+/// 7 loại tài nguyên. Id lưu trữ là tên enum (ổn định, không đổi): `coins` là Vàng (tiền tệ chính).
+/// Thêm loại mới chỉ được APPEND vào cuối để save cũ (thiếu khóa → 0) vẫn đọc được.
+enum Res { food, coins, wood, iron, tools, stone, cloth }
 
 enum Role { spearman, archer, cavalry }
 
 /// Ba thuộc tính huấn luyện được (VERIFIED: ảnh chụp bảng binh sĩ). Tốc độ là chỉ số dẫn xuất, không phải thuộc tính.
 enum Stat { str, dex, con }
 
-enum Slot { weapon, armor, accessory }
+/// Ba nhóm trang bị bán ở Lò rèn: vũ khí, giáp, khiên. [accessory] là ô phụ kiện có từ trước (nhẫn, giày, bùa):
+/// vẫn dùng được và bán lại được, nhưng không phải nhóm hàng của Lò rèn.
+enum Slot { weapon, armor, shield, accessory }
 
 enum TraitId { none, bornLeader, brutal, tough, nimble, quickLearner, coward }
 
@@ -22,9 +26,20 @@ enum Building { barracks, smithy, tavern }
 enum FacilityType {
   meleeYard,
   archeryRange,
+
+  /// Hiển thị là "Bãi đá"; id giữ nguyên để tương thích save.
   enduranceYard,
   infirmary,
-  campfire,
+
+  /// Hòm đồ: xây không giới hạn, mỗi hòm tăng sức chứa kho đồ. Không chiếm ô, không nhận binh sĩ.
+  storageChest,
+
+  /// Bia mộ: tưởng niệm binh sĩ đã ngã xuống. Xây một lần, không nhận binh sĩ.
+  gravestone,
+
+  /// Doanh trại: hình/vị trí của công trình trong trại. CẤP của nó nằm ở `GameState.buildings[Building.barracks]`
+  /// (nguồn duy nhất của cấp); instance này chỉ cho biết đặt ở đâu.
+  barracks,
 }
 
 typedef Cost = Map<Res, int>;
@@ -78,6 +93,7 @@ class Soldier {
     this.weaponId,
     this.armorId,
     this.accessoryId,
+    this.shieldId,
     this.morale = 70,
     this.hp = 0,
     this.status = SoldierStatus.active,
@@ -96,6 +112,7 @@ class Soldier {
   String? weaponId;
   String? armorId;
   String? accessoryId;
+  String? shieldId;
   int morale;
 
   /// HP hiện tại (kéo dài giữa các trận). 0 khi vừa tạo nghĩa là "đầy"; luật chuẩn hóa ngay khi tạo.
@@ -115,6 +132,7 @@ class Soldier {
   String? equipped(Slot s) => switch (s) {
     Slot.weapon => weaponId,
     Slot.armor => armorId,
+    Slot.shield => shieldId,
     Slot.accessory => accessoryId,
   };
 
@@ -124,6 +142,8 @@ class Soldier {
         weaponId = id;
       case Slot.armor:
         armorId = id;
+      case Slot.shield:
+        shieldId = id;
       case Slot.accessory:
         accessoryId = id;
     }
@@ -140,6 +160,7 @@ class Soldier {
     'weapon': weaponId,
     'armor': armorId,
     'accessory': accessoryId,
+    'shield': shieldId,
     'morale': morale,
     'hp': hp,
     'status': status.name,
@@ -174,6 +195,7 @@ class Soldier {
       weaponId: item(j['weapon']),
       armorId: item(j['armor']),
       accessoryId: item(j['accessory']),
+      shieldId: item(j['shield']),
       morale: intIn(j['morale'], 0, 100, 'tinh thần'),
       hp: intIn(j['hp'], 0, 100000, 'HP'),
       status: enumByName(SoldierStatus.values, j['status']),
@@ -482,7 +504,18 @@ class GameState {
         j['buildings'],
         max: maxBuildingLevel,
       );
-      final facilities = list(j['facilities'], Facility.fromJson);
+      // Bếp lửa từng được lưu như một công trình; nay chỉ là hình trang trí của trại, nên bỏ khi đọc
+      // save cũ (không chiếm ô, không tính vào số công trình). Mọi công trình thật được giữ nguyên.
+      final rawFacilities = j['facilities'];
+      final facilities = list(
+        rawFacilities is List
+            ? [
+                for (final e in rawFacilities)
+                  if (!(e is Map && e['type'] == 'campfire')) e,
+              ]
+            : rawFacilities,
+        Facility.fromJson,
+      );
       final nextFacility = intIn(j['nextFacilityId'], 1, 1 << 30);
       final fids = <int>{};
       final assignedSeen = <int>{};

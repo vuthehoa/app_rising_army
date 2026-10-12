@@ -45,13 +45,13 @@ class _VendorScreenState extends State<VendorScreen> {
     final open = GameRules.vendorOpen(s, v) && s.visiting == v.cityId;
 
     // Danh sách mục theo tab.
-    final buyItems = [for (final id in v.items.keys) itemDefs[id]!];
+    final buyItems = [for (final id in st.items.keys) itemDefs[id]!];
     final sellItems = [
       for (final e in s.inventory.entries)
         if (e.value > 0 && GameRules.buysItem(v, itemDefs[e.key]!))
           itemDefs[e.key]!,
     ];
-    final resList = [for (final r in v.resources.keys) r];
+    final resList = [for (final r in st.resources.keys) r];
 
     Widget row({
       required Widget leading,
@@ -152,7 +152,7 @@ class _VendorScreenState extends State<VendorScreen> {
                       leading: ItemGlyph(it.id, size: 34),
                       title: it.name,
                       sub: (st.items[it.id] ?? 0) > 0
-                          ? 'Còn ${st.items[it.id]} • bậc ${it.tier}'
+                          ? 'Còn ${st.items[it.id]} • ${slotNames[it.slot]} • phẩm ${it.grade} • cần cấp ${it.reqLevel}'
                           : 'Hết hàng',
                       trailing: '${GameRules.buyPrice(v, it.id)}',
                       selected: _item == it.id,
@@ -313,7 +313,7 @@ class _VendorScreenState extends State<VendorScreen> {
       final ok = await confirm(
         context,
         'Xác nhận mua',
-        'Chi $total đồng xu (bạn có ${s.res[Res.coins]}).',
+        'Chi $total vàng (bạn có ${s.res[Res.coins]}).',
       );
       if (!ok || !context.mounted) return;
     }
@@ -370,7 +370,7 @@ class _VendorScreenState extends State<VendorScreen> {
       } else if (capLeft <= 0) {
         lock = 'Kho đồ đầy';
       } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
-        lock = 'Thiếu ${unit - s.res[Res.coins]!} đồng xu';
+        lock = 'Thiếu ${unit - s.res[Res.coins]!} vàng';
       }
     } else if (owned <= 0) {
       lock = 'Không có trong kho';
@@ -512,7 +512,7 @@ class _VendorScreenState extends State<VendorScreen> {
               _qtyRow(maxQty, 'món'),
               const SizedBox(height: 4),
               Text(
-                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total đồng xu',
+                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total vàng',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
@@ -584,7 +584,7 @@ class _VendorScreenState extends State<VendorScreen> {
       if (stock <= 0) {
         lock = 'Hết hàng';
       } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
-        lock = 'Thiếu ${unit - s.res[Res.coins]!} đồng xu';
+        lock = 'Thiếu ${unit - s.res[Res.coins]!} vàng';
       }
     } else if (owned <= 0) {
       lock = 'Cần ít nhất $resourceLotSize ${resNames[r]!.toLowerCase()}';
@@ -624,7 +624,7 @@ class _VendorScreenState extends State<VendorScreen> {
               _qtyRow(maxQty, 'lô'),
               const SizedBox(height: 4),
               Text(
-                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total đồng xu (${qty * resourceLotSize} ${resNames[r]!.toLowerCase()})',
+                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total vàng (${qty * resourceLotSize} ${resNames[r]!.toLowerCase()})',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),

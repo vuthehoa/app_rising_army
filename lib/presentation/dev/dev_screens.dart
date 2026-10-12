@@ -5,6 +5,12 @@ import '../../application/new_game_flow.dart';
 import '../../data/save_repository.dart';
 import '../../domain/rules.dart';
 import '../screens/battle_screen.dart';
+import '../screens/buildings_screen.dart';
+import '../screens/camp_hub.dart';
+import '../screens/map_screen.dart';
+import '../screens/missions_screen.dart';
+import '../screens/recruit_screen.dart';
+import '../screens/roster_screen.dart';
 import '../screens/city_screen.dart';
 import '../screens/deploy_screen.dart';
 import '../screens/intro_screen.dart';
@@ -14,6 +20,7 @@ import '../screens/new_game_screen.dart';
 import '../screens/result_screen.dart';
 import '../screens/shell.dart';
 import '../screens/squad_screen.dart';
+import '../screens/tavern_screen.dart';
 import '../screens/vendor_screen.dart';
 import '../widgets/common.dart';
 
@@ -21,12 +28,16 @@ import '../widgets/common.dart';
 ///
 /// Mọi màn hình chạy trên một [GameController] SANDBOX (MemoryStore, ván mới riêng): mở màn hình
 /// không đụng ván đang chơi, không ghi save chính, không tạo ván mới cho controller chính.
-/// Các màn hình `GameShell` gồm các tab Trại / Binh sĩ / Tuyển mộ / Nhiệm vụ / Bản đồ / Xây dựng.
+/// Các tab của `GameShell` (Trại / Binh sĩ / Tuyển mộ / Nhiệm vụ / Bản đồ / Xây dựng) cũng có mục riêng.
 class DevScreenEntry {
-  const DevScreenEntry(this.group, this.title, this.build);
+  const DevScreenEntry(this.group, this.title, this.type, this.build);
 
   final String group;
   final String title;
+
+  /// Widget màn hình mà mục này mở. Test đối chiếu với các màn hình thật trong `presentation/screens`
+  /// để màn hình mới không bị quên đăng ký.
+  final Type type;
 
   /// Dựng màn hình bên trong sandbox; [DevSandbox.expedition] có sẵn cho Battle/Result.
   final Widget Function(DevSandbox sandbox) build;
@@ -60,50 +71,101 @@ class DevSandbox {
 }
 
 final devScreens = <DevScreenEntry>[
-  DevScreenEntry('Gameplay', 'Game Shell (Trại, Binh sĩ, Tuyển mộ, ...)', (_) {
-    return const GameShell();
+  DevScreenEntry(
+    'Gameplay',
+    'Game Shell (Trại, Binh sĩ, Tuyển mộ, ...)',
+    GameShell,
+    (_) {
+      return const GameShell();
+    },
+  ),
+  DevScreenEntry('Tab của Game Shell', 'Trại (CampHub)', CampHub, (_) {
+    return const _ShellTab(CampHub());
   }),
-  DevScreenEntry('Gameplay', 'Squad: chọn đội', (_) {
+  DevScreenEntry('Tab của Game Shell', 'Binh sĩ (Roster)', RosterScreen, (_) {
+    return const _ShellTab(RosterScreen());
+  }),
+  DevScreenEntry('Tab của Game Shell', 'Tuyển mộ (Recruit)', RecruitScreen, (
+    _,
+  ) {
+    return const _ShellTab(RecruitScreen());
+  }),
+  DevScreenEntry('Tab của Game Shell', 'Nhiệm vụ (Missions)', MissionsScreen, (
+    _,
+  ) {
+    return const _ShellTab(MissionsScreen());
+  }),
+  DevScreenEntry('Tab của Game Shell', 'Bản đồ (Map)', MapScreen, (_) {
+    return const _ShellTab(MapScreen());
+  }),
+  DevScreenEntry(
+    'Tab của Game Shell',
+    'Xây dựng (Buildings)',
+    BuildingsScreen,
+    (_) {
+      return const _ShellTab(BuildingsScreen());
+    },
+  ),
+  DevScreenEntry('Gameplay', 'Squad: chọn đội', SquadScreen, (_) {
     return const SquadScreen(locationId: DevSandbox.expeditionLocation);
   }),
-  DevScreenEntry('Gameplay', 'Deploy: triển khai', (sb) {
+  DevScreenEntry('Gameplay', 'Deploy: triển khai', DeployScreen, (sb) {
     final ids = [for (final so in sb.controller.state!.roster.take(4)) so.id];
     return DeployScreen(
       locationId: DevSandbox.expeditionLocation,
       squadIds: ids,
     );
   }),
-  DevScreenEntry('Gameplay', 'Battle: trận đánh', (sb) {
+  DevScreenEntry('Gameplay', 'Battle: trận đánh', BattleScreen, (sb) {
     final e = sb.expedition;
     return e?.battle == null
         ? const _Unavailable('Sandbox không tạo được trận đánh.')
         : BattleScreen(result: e!);
   }),
-  DevScreenEntry('Gameplay', 'Result: kết quả', (sb) {
+  DevScreenEntry('Gameplay', 'Result: kết quả', ResultScreen, (sb) {
     final e = sb.expedition;
     return e == null
         ? const _Unavailable('Sandbox không tạo được viễn chinh.')
         : ResultScreen(result: e);
   }),
-  DevScreenEntry('Gameplay', 'City: thành phố', (_) {
+  DevScreenEntry('Gameplay', 'City: thành phố', CityScreen, (_) {
     return const CityScreen(cityId: 'g_town');
   }),
-  DevScreenEntry('Gameplay', 'Vendor: thợ rèn', (_) {
+  DevScreenEntry('Gameplay', 'Tavern: quán rượu', TavernScreen, (_) {
+    return const TavernScreen(vendorId: 'g_tavern');
+  }),
+  DevScreenEntry('Gameplay', 'Vendor: thợ rèn', VendorScreen, (_) {
     return const VendorScreen(vendorId: 'g_smith');
   }),
-  DevScreenEntry('Menu & ván mới', 'Menu chính', (_) {
+  DevScreenEntry('Menu & ván mới', 'Menu chính', MainMenuScreen, (_) {
     return const MainMenuScreen();
   }),
-  DevScreenEntry('Menu & ván mới', 'New Game: nhân vật', (_) {
+  DevScreenEntry('Menu & ván mới', 'New Game: nhân vật', NewGameScreen, (_) {
     return const NewGameScreen();
   }),
-  DevScreenEntry('Menu & ván mới', 'Legion Flag: quân kỳ', (sb) {
+  DevScreenEntry('Menu & ván mới', 'Legion Flag: quân kỳ', LegionFlagScreen, (
+    sb,
+  ) {
     return LegionFlagScreen(flow: NewGameFlow(sb.controller));
   }),
-  DevScreenEntry('Menu & ván mới', 'Intro', (sb) {
+  DevScreenEntry('Menu & ván mới', 'Intro', IntroScreen, (sb) {
     return IntroScreen(flow: NewGameFlow(sb.controller));
   }),
 ];
+
+/// Bao một tab của GameShell để mở riêng: cung cấp [ShellNav] (các nút chuyển tab không làm gì)
+/// trên controller sandbox.
+class _ShellTab extends StatelessWidget {
+  const _ShellTab(this.child);
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ShellNav(
+    go: (_) {},
+    child: Scaffold(body: SafeArea(child: child)),
+  );
+}
 
 class _Unavailable extends StatelessWidget {
   const _Unavailable(this.message);

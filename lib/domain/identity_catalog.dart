@@ -130,6 +130,7 @@ class IdentityCatalog {
   static const defaultEmblemColorId = 'gold';
 
   static const defaultDisplayName = 'Chỉ huy';
+  static const defaultLegionName = 'Thiết Huyết Quân';
 
   // ----------------------------------------------------------
   // AVATARS

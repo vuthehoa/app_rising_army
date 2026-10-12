@@ -1,3 +1,4 @@
+import 'item_grade.dart';
 import 'models.dart';
 
 /// Toàn bộ dữ liệu có cấu trúc của game. Thêm vật phẩm/địa điểm/nhiệm vụ = thêm dòng ở đây,
@@ -5,10 +6,35 @@ import 'models.dart';
 
 const resNames = <Res, String>{
   Res.food: 'Lương thực',
-  Res.coins: 'Đồng xu',
+  Res.coins: 'Vàng',
   Res.wood: 'Gỗ',
   Res.iron: 'Sắt',
+  Res.tools: 'Công cụ',
+  Res.stone: 'Đá',
+  Res.cloth: 'Vải',
 };
+
+/// Id nghiệp vụ của 7 tài nguyên (ổn định). Id LƯU TRỮ là `Res.name`; riêng Vàng lưu là `coins`
+/// (không đổi để tương thích save cũ) và có id nghiệp vụ `coin`.
+const resourceIds = <Res, String>{
+  Res.coins: 'coin',
+  Res.food: 'food',
+  Res.tools: 'tools',
+  Res.iron: 'iron',
+  Res.stone: 'stone',
+  Res.wood: 'wood',
+  Res.cloth: 'cloth',
+};
+
+/// Tài nguyên cơ bản mua bán được ở Chợ (Vàng là tiền thanh toán, không phải hàng hóa).
+const marketResources = <Res>[
+  Res.food,
+  Res.tools,
+  Res.iron,
+  Res.stone,
+  Res.wood,
+  Res.cloth,
+];
 
 const roleNames = <Role, String>{
   Role.spearman: 'Giáo binh',
@@ -31,6 +57,7 @@ const statNames = <Stat, String>{
 const slotNames = <Slot, String>{
   Slot.weapon: 'Vũ khí',
   Slot.armor: 'Áo giáp',
+  Slot.shield: 'Khiên',
   Slot.accessory: 'Phụ kiện',
 };
 
@@ -85,7 +112,6 @@ class ItemDef {
     this.defense = 0,
     this.speed = 0,
     this.bonus = const {},
-    this.reqLevel = 1,
     this.reqStr = 0,
   });
 
@@ -99,8 +125,14 @@ class ItemDef {
   final int defense;
   final int speed;
   final Map<Stat, int> bonus;
-  final int reqLevel;
   final int reqStr;
+
+  /// Phẩm cấp trang bị (Level 1–6): chính là [tier].
+  int get grade => tier;
+
+  /// Cấp anh hùng tối thiểu để dùng: `hero.level >= reqLevel` (Level 1: không có điều kiện bổ sung).
+  /// Suy ra từ phẩm cấp, không lưu riêng, nên không thể lệch khỏi quy tắc.
+  int get reqLevel => requiredHeroLevel(tier);
 }
 
 const melee = {Role.spearman, Role.cavalry};
@@ -123,7 +155,6 @@ const itemDefs = <String, ItemDef>{
     price: 60,
     roles: melee,
     damage: 7,
-    reqLevel: 2,
   ),
   'steel_pike': ItemDef(
     id: 'steel_pike',
@@ -133,7 +164,6 @@ const itemDefs = <String, ItemDef>{
     price: 140,
     roles: melee,
     damage: 10,
-    reqLevel: 4,
   ),
   'short_sword': ItemDef(
     id: 'short_sword',
@@ -154,7 +184,6 @@ const itemDefs = <String, ItemDef>{
     roles: melee,
     damage: 8,
     speed: 1,
-    reqLevel: 2,
   ),
   'riders_lance': ItemDef(
     id: 'riders_lance',
@@ -164,7 +193,6 @@ const itemDefs = <String, ItemDef>{
     price: 80,
     roles: {Role.cavalry},
     damage: 9,
-    reqLevel: 2,
   ),
   'hunting_bow': ItemDef(
     id: 'hunting_bow',
@@ -183,7 +211,6 @@ const itemDefs = <String, ItemDef>{
     price: 60,
     roles: {Role.archer},
     damage: 7,
-    reqLevel: 2,
   ),
   'war_bow': ItemDef(
     id: 'war_bow',
@@ -193,7 +220,6 @@ const itemDefs = <String, ItemDef>{
     price: 140,
     roles: {Role.archer},
     damage: 10,
-    reqLevel: 4,
   ),
   'padded_armor': ItemDef(
     id: 'padded_armor',
@@ -219,7 +245,6 @@ const itemDefs = <String, ItemDef>{
     price: 90,
     defense: 6,
     reqStr: 8,
-    reqLevel: 2,
   ),
   'plate_armor': ItemDef(
     id: 'plate_armor',
@@ -230,7 +255,6 @@ const itemDefs = <String, ItemDef>{
     defense: 9,
     speed: -2,
     reqStr: 11,
-    reqLevel: 4,
   ),
   'lucky_charm': ItemDef(
     id: 'lucky_charm',
@@ -271,7 +295,6 @@ const itemDefs = <String, ItemDef>{
     tier: 2,
     price: 90,
     bonus: {Stat.str: 2},
-    reqLevel: 2,
   ),
   'wind_boots': ItemDef(
     id: 'wind_boots',
@@ -280,7 +303,6 @@ const itemDefs = <String, ItemDef>{
     tier: 2,
     price: 90,
     speed: 2,
-    reqLevel: 2,
   ),
   'saint_amulet': ItemDef(
     id: 'saint_amulet',
@@ -289,7 +311,142 @@ const itemDefs = <String, ItemDef>{
     tier: 2,
     price: 90,
     bonus: {Stat.con: 2},
-    reqLevel: 2,
+  ),
+  // ---- Phẩm cấp 4–6 và khiên (mở rộng theo hệ phẩm cấp 1–6). Chỉ số/giá nội suy từ bậc 1–3 hiện có (GIẢ ĐỊNH). ----
+  'knight_sword': ItemDef(
+    id: 'knight_sword',
+    name: 'Kiếm hiệp sĩ',
+    slot: Slot.weapon,
+    tier: 4,
+    price: 260,
+    roles: melee,
+    damage: 13,
+  ),
+  'composite_bow': ItemDef(
+    id: 'composite_bow',
+    name: 'Cung phức hợp',
+    slot: Slot.weapon,
+    tier: 4,
+    price: 260,
+    roles: {Role.archer},
+    damage: 13,
+  ),
+  'royal_sword': ItemDef(
+    id: 'royal_sword',
+    name: 'Kiếm hoàng gia',
+    slot: Slot.weapon,
+    tier: 5,
+    price: 420,
+    roles: melee,
+    damage: 16,
+  ),
+  'dragon_bow': ItemDef(
+    id: 'dragon_bow',
+    name: 'Cung long cốt',
+    slot: Slot.weapon,
+    tier: 5,
+    price: 420,
+    roles: {Role.archer},
+    damage: 16,
+  ),
+  'sun_blade': ItemDef(
+    id: 'sun_blade',
+    name: 'Kiếm Thái Dương',
+    slot: Slot.weapon,
+    tier: 6,
+    price: 700,
+    roles: melee,
+    damage: 20,
+  ),
+  'sky_bow': ItemDef(
+    id: 'sky_bow',
+    name: 'Cung Thiên Vũ',
+    slot: Slot.weapon,
+    tier: 6,
+    price: 700,
+    roles: {Role.archer},
+    damage: 20,
+  ),
+  'half_plate': ItemDef(
+    id: 'half_plate',
+    name: 'Giáp bán tấm',
+    slot: Slot.armor,
+    tier: 4,
+    price: 280,
+    defense: 11,
+    speed: -2,
+    reqStr: 13,
+  ),
+  'full_plate': ItemDef(
+    id: 'full_plate',
+    name: 'Giáp tấm toàn thân',
+    slot: Slot.armor,
+    tier: 5,
+    price: 440,
+    defense: 13,
+    speed: -3,
+    reqStr: 15,
+  ),
+  'dragon_scale_armor': ItemDef(
+    id: 'dragon_scale_armor',
+    name: 'Giáp vảy rồng',
+    slot: Slot.armor,
+    tier: 6,
+    price: 720,
+    defense: 16,
+    speed: -2,
+    reqStr: 16,
+  ),
+  'wooden_shield': ItemDef(
+    id: 'wooden_shield',
+    name: 'Khiên gỗ',
+    slot: Slot.shield,
+    tier: 1,
+    price: 15,
+    defense: 1,
+  ),
+  'round_shield': ItemDef(
+    id: 'round_shield',
+    name: 'Khiên tròn',
+    slot: Slot.shield,
+    tier: 2,
+    price: 50,
+    defense: 2,
+  ),
+  'kite_shield': ItemDef(
+    id: 'kite_shield',
+    name: 'Khiên hình diều',
+    slot: Slot.shield,
+    tier: 3,
+    price: 110,
+    defense: 3,
+  ),
+  'knight_shield': ItemDef(
+    id: 'knight_shield',
+    name: 'Khiên hiệp sĩ',
+    slot: Slot.shield,
+    tier: 4,
+    price: 230,
+    defense: 4,
+  ),
+  'tower_shield': ItemDef(
+    id: 'tower_shield',
+    name: 'Khiên tháp',
+    slot: Slot.shield,
+    tier: 5,
+    price: 400,
+    defense: 5,
+    speed: -1,
+    reqStr: 14,
+  ),
+  'dragon_shield': ItemDef(
+    id: 'dragon_shield',
+    name: 'Khiên rồng',
+    slot: Slot.shield,
+    tier: 6,
+    price: 680,
+    defense: 6,
+    reqStr: 15,
   ),
 };
 
@@ -928,7 +1085,7 @@ const nickNames = [
 const kingStipendFood = 10;
 const kingStipendCoins = 16;
 
-/// Trợ cấp khẩn: khi quân sống ít hơn [reliefThreshold], nhà vua cấp thêm đồng xu mỗi ngày
+/// Trợ cấp khẩn: khi quân sống ít hơn [reliefThreshold], nhà vua cấp thêm vàng mỗi ngày
 /// để dựng lại lực lượng, giảm dần tuyến tính theo số quân (không có "vách đá" khuyến khích giữ quân nhỏ).
 /// Không hồi sinh ai; chỉ giúp tuyển người mới.
 const reliefThreshold = 6;
@@ -946,24 +1103,57 @@ const trainingXp = 15;
 
 // ---- Thành phố và người bán ----
 
-enum VendorKind { weapons, armor, accessories, supplies }
+/// Loại địa điểm có thể ghé trong thành phố.
+enum CityLocationKind { market, smithy, tavern }
+
+/// Loại nhà cung cấp/cửa hàng và hành vi giao dịch tương ứng:
+/// * [market] (Chợ): mua và bán tài nguyên cơ bản;
+/// * [smithy] (Lò rèn): mua và bán trang bị;
+/// * [tavern] (Quán rượu): chiêu mộ anh hùng.
+/// Khác với loại công trình trại ([FacilityType]/[Building]) và loại vật phẩm ([Slot]).
+enum VendorKind { market, smithy, tavern }
 
 const vendorKindNames = <VendorKind, String>{
-  VendorKind.weapons: 'Vũ khí',
-  VendorKind.armor: 'Áo giáp',
-  VendorKind.accessories: 'Phụ kiện',
-  VendorKind.supplies: 'Vật tư',
+  VendorKind.market: 'Chợ',
+  VendorKind.smithy: 'Lò rèn',
+  VendorKind.tavern: 'Quán rượu',
+};
+
+/// Ánh xạ địa điểm thành phố → loại cửa hàng (1–1, thể hiện bằng code chứ không bằng tên hiển thị).
+VendorKind vendorKindOf(CityLocationKind k) => switch (k) {
+  CityLocationKind.market => VendorKind.market,
+  CityLocationKind.smithy => VendorKind.smithy,
+  CityLocationKind.tavern => VendorKind.tavern,
+};
+
+CityLocationKind cityLocationOf(VendorKind k) => switch (k) {
+  VendorKind.market => CityLocationKind.market,
+  VendorKind.smithy => CityLocationKind.smithy,
+  VendorKind.tavern => CityLocationKind.tavern,
 };
 
 /// Giá bán mỗi lô 10 đơn vị tài nguyên tại người bán vật tư; mua lại bằng [sellRatio] giá này.
 const resourceLotSize = 10;
-const resourceLotPrice = <Res, int>{Res.food: 20, Res.wood: 30, Res.iron: 60};
+
+///
+/// Giá công cụ/đá/vải (mỗi lô) là GIẢ ĐỊNH để khớp thang giá hiện có (lương thực 20 < gỗ 30 < sắt 60).
+const resourceLotPrice = <Res, int>{
+  Res.food: 20,
+  Res.wood: 30,
+  Res.iron: 60,
+  Res.tools: 80,
+  Res.stone: 40,
+  Res.cloth: 50,
+};
 
 /// Người bán chỉ trả [sellRatio] giá trị gốc khi mua lại đồ của người chơi.
 const sellRatio = 0.4;
 
-/// Tái cung hàng mỗi [restockEveryDays] ngày: cộng thêm một phần ba mức tối đa (làm tròn lên).
-const restockEveryDays = 6;
+/// Cấp tối đa của ứng viên xuất hiện ở Quán rượu (1..3, gồm cả hai đầu).
+const tavernMaxCandidateLevel = 3;
+
+/// Số mặt hàng khác nhau Lò rèn bày bán mỗi ngày (chọn xác định theo seed, ngày và người bán).
+const smithyDailyPicks = 8;
 
 int inventoryCapacityFor(int barracksLevel) => 30 + 10 * barracksLevel;
 
@@ -986,6 +1176,9 @@ class VendorDef {
   final VendorKind kind;
   final String blurb;
 
+  /// Địa điểm thành phố tương ứng với loại cửa hàng này.
+  CityLocationKind get location => cityLocationOf(kind);
+
   /// Tồn kho tối đa theo vật phẩm.
   final Map<String, int> items;
 
@@ -997,105 +1190,149 @@ class VendorDef {
   final int unlockTier;
 }
 
+/// Mỗi thành phố có đủ ba cửa hàng: Chợ, Lò rèn, Quán rượu.
+/// Lò rèn: [VendorDef.items] là KHO HÀNG TỐI ĐA mỗi ngày (tối đa theo từng món); mỗi ngày chỉ bày
+/// [smithyDailyPicks] món chọn xác định. Phẩm cấp 6 không bao giờ xuất hiện ở đây.
+/// Chợ: [VendorDef.resources] là tồn kho (lô) được đặt lại mỗi ngày.
+/// Quán rượu: không có hàng; chiêu mộ từ danh sách ứng viên trong ngày (`GameState.candidates`).
 const vendors = <VendorDef>[
+  // ---- Thị trấn Đá Xám ----
+  VendorDef(
+    id: 'g_market',
+    cityId: 'g_town',
+    name: 'Chợ Đá Xám',
+    kind: VendorKind.market,
+    blurb: 'Mua bán lương thực, công cụ, sắt, đá, gỗ và vải theo lô.',
+    priceMult: 1.0,
+    resources: {
+      Res.food: 20,
+      Res.tools: 6,
+      Res.iron: 6,
+      Res.stone: 10,
+      Res.wood: 12,
+      Res.cloth: 8,
+    },
+  ),
   VendorDef(
     id: 'g_smith',
     cityId: 'g_town',
-    name: 'Thợ rèn Đá Xám',
-    kind: VendorKind.weapons,
-    blurb: 'Vũ khí thường dân, có chút hàng bậc 2 giá cao.',
+    name: 'Lò rèn Đá Xám',
+    kind: VendorKind.smithy,
+    blurb: 'Vũ khí, giáp và khiên phẩm cấp 1–2.',
     priceMult: 1.1,
     items: {
       'wooden_spear': 5,
       'short_sword': 4,
       'hunting_bow': 5,
       'iron_spear': 2,
-      'arming_sword': 1,
+      'arming_sword': 2,
+      'long_bow': 2,
+      'padded_armor': 6,
+      'leather_armor': 5,
+      'chain_mail': 2,
+      'wooden_shield': 5,
+      'round_shield': 2,
     },
   ),
   VendorDef(
-    id: 'g_tailor',
+    id: 'g_tavern',
     cityId: 'g_town',
-    name: 'Thợ may giáp',
-    kind: VendorKind.armor,
-    blurb: 'Áo độn và giáp da; vài bộ giáp xích.',
-    priceMult: 1.1,
-    items: {'padded_armor': 6, 'leather_armor': 5, 'chain_mail': 2},
+    name: 'Quán rượu Đá Xám',
+    kind: VendorKind.tavern,
+    blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
   ),
+  // ---- Thành Tro ----
   VendorDef(
-    id: 'g_market',
-    cityId: 'g_town',
-    name: 'Chợ vật tư',
-    kind: VendorKind.supplies,
-    blurb: 'Lương thực, gỗ, sắt theo lô; bùa hộ mệnh bậc 1.',
-    priceMult: 1.0,
-    items: {
-      'lucky_charm': 3,
-      'iron_ring': 3,
-      'swift_boots': 3,
-      'bone_amulet': 3,
+    id: 'a_market',
+    cityId: 'a_city',
+    name: 'Chợ Thành Tro',
+    kind: VendorKind.market,
+    blurb: 'Chợ lớn: nhiều công cụ, đá và sắt hơn.',
+    priceMult: 1.2,
+    resources: {
+      Res.food: 14,
+      Res.tools: 8,
+      Res.iron: 8,
+      Res.stone: 12,
+      Res.wood: 8,
+      Res.cloth: 10,
     },
-    resources: {Res.food: 20, Res.wood: 12, Res.iron: 6},
   ),
   VendorDef(
     id: 'a_arms',
     cityId: 'a_city',
     name: 'Xưởng binh khí Tro',
-    kind: VendorKind.weapons,
-    blurb: 'Vũ khí bậc 2; vũ khí bậc 3 chỉ bán cho người có tiếng với nhà vua.',
+    kind: VendorKind.smithy,
+    blurb: 'Trang bị phẩm cấp 2–3.',
     priceMult: 1.2,
     items: {
-      'long_bow': 3,
-      'riders_lance': 2,
-      'arming_sword': 3,
       'iron_spear': 3,
+      'arming_sword': 3,
+      'riders_lance': 2,
+      'long_bow': 3,
       'steel_pike': 1,
       'war_bow': 1,
+      'chain_mail': 4,
+      'plate_armor': 1,
+      'round_shield': 3,
+      'kite_shield': 2,
     },
   ),
   VendorDef(
-    id: 'a_armor',
+    id: 'a_tavern',
     cityId: 'a_city',
-    name: 'Thợ giáp Tro',
-    kind: VendorKind.armor,
-    blurb: 'Giáp xích; giáp tấm hiếm.',
+    name: 'Quán rượu Thành Tro',
+    kind: VendorKind.tavern,
+    blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
     priceMult: 1.2,
-    items: {'chain_mail': 4, 'plate_armor': 1},
-    unlockTier: 1,
   ),
+  // ---- Cảng Đầm Đen ----
   VendorDef(
-    id: 'a_charms',
-    cityId: 'a_city',
-    name: 'Hiệu phụ kiện',
-    kind: VendorKind.accessories,
-    blurb: 'Phụ kiện bậc 2.',
-    priceMult: 1.2,
-    items: {'knight_ring': 2, 'wind_boots': 2, 'saint_amulet': 2},
-    resources: {Res.iron: 8, Res.wood: 8},
+    id: 'm_docks',
+    cityId: 'm_port',
+    name: 'Bến vật tư',
+    kind: VendorKind.market,
+    blurb: 'Gỗ, sắt, đá số lượng lớn.',
+    priceMult: 1.0,
+    resources: {
+      Res.food: 14,
+      Res.tools: 6,
+      Res.iron: 14,
+      Res.stone: 14,
+      Res.wood: 20,
+      Res.cloth: 12,
+    },
   ),
   VendorDef(
     id: 'm_black',
     cityId: 'm_port',
     name: 'Chợ đen Đầm Đen',
-    kind: VendorKind.weapons,
-    blurb: 'Hàng hiếm bậc 3, giá cắt cổ.',
+    kind: VendorKind.smithy,
+    blurb: 'Hàng hiếm phẩm cấp 3–5, giá cắt cổ. Không bán phẩm cấp 6.',
     priceMult: 1.4,
+    unlockTier: 1,
     items: {
       'steel_pike': 2,
       'war_bow': 2,
       'plate_armor': 2,
-      'saint_amulet': 2,
-      'knight_ring': 2,
+      'kite_shield': 2,
+      'knight_sword': 1,
+      'composite_bow': 1,
+      'half_plate': 1,
+      'knight_shield': 1,
+      'royal_sword': 1,
+      'dragon_bow': 1,
+      'full_plate': 1,
+      'tower_shield': 1,
     },
   ),
   VendorDef(
-    id: 'm_docks',
+    id: 'm_tavern',
     cityId: 'm_port',
-    name: 'Bến vật tư',
-    kind: VendorKind.supplies,
-    blurb: 'Gỗ và sắt số lượng lớn.',
-    priceMult: 1.0,
-    resources: {Res.wood: 20, Res.iron: 14, Res.food: 14},
+    name: 'Quán rượu Đầm Đen',
+    kind: VendorKind.tavern,
+    blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
+    priceMult: 1.4,
   ),
 ];
 
@@ -1120,6 +1357,9 @@ class FacilityDef {
     this.cost, {
     this.trains,
     this.verified = false,
+    this.maxCount = 1,
+    this.takesAssignment = true,
+    this.usesSlot = true,
   });
 
   final String name;
@@ -1131,11 +1371,20 @@ class FacilityDef {
 
   /// Tên/hiệu ứng được xác minh trực tiếp bằng ảnh/clip chính thức.
   final bool verified;
+
+  /// Số lượng tối đa được xây trong trại; null = không giới hạn.
+  final int? maxCount;
+
+  /// Có nhận binh sĩ được gán (kéo-thả) hay không.
+  final bool takesAssignment;
+
+  /// Có chiếm một ô công trình trong trại và tính vào [maxFacilities] hay không.
+  final bool usesSlot;
 }
 
 const facilityDefs = <FacilityType, FacilityDef>{
   FacilityType.meleeYard: FacilityDef(
-    'Bãi tập cận chiến',
+    'Bãi cận chiến',
     'Bù nhìn tập đánh: huấn luyện Sức mạnh. Tối đa 3 người.',
     {Res.wood: 40, Res.coins: 30},
     trains: Stat.str,
@@ -1146,9 +1395,10 @@ const facilityDefs = <FacilityType, FacilityDef>{
     {Res.wood: 40, Res.coins: 30},
     trains: Stat.dex,
   ),
+  // Id kỹ thuật `enduranceYard` được giữ nguyên để tương thích save; tên hiển thị là Bãi đá.
   FacilityType.enduranceYard: FacilityDef(
-    'Bãi rèn thể lực',
-    'Rèn sức bền: huấn luyện Thể trạng. Tối đa 3 người. (Tên và hiệu ứng là đề xuất.)',
+    'Bãi đá',
+    'Khiêng đá rèn sức bền: huấn luyện Thể trạng. Tối đa 3 người. (Hiệu ứng là đề xuất.)',
     {Res.wood: 50, Res.iron: 10, Res.coins: 30},
     trains: Stat.con,
   ),
@@ -1158,19 +1408,109 @@ const facilityDefs = <FacilityType, FacilityDef>{
     {Res.wood: 40, Res.coins: 40},
     verified: true,
   ),
-  FacilityType.campfire: FacilityDef(
-    '',
-    'Nơi tập hợp binh sĩ. Có sẵn, không xây thêm.',
-    {},
-    verified: true,
+  FacilityType.storageChest: FacilityDef(
+    'Hòm đồ',
+    'Mỗi hòm tăng sức chứa kho đồ thêm 10. Xây được nhiều hòm. (Chi phí là đề xuất.)',
+    {Res.wood: 30, Res.coins: 20},
+    maxCount: null,
+    takesAssignment: false,
+    usesSlot: false,
+  ),
+  // Chi phí XÂY = chi phí cấp 1 ([upgradeCosts]); các cấp sau là nâng cấp (xem GameRules.upgradeBuilding).
+  FacilityType.barracks: FacilityDef(
+    'Doanh trại',
+    'Sức chứa binh sĩ: 6 + 4 mỗi cấp; kho đồ +10 mỗi cấp. Xây một lần rồi nâng cấp.',
+    {Res.wood: 40, Res.coins: 30},
+    takesAssignment: false,
+  ),
+  FacilityType.gravestone: FacilityDef(
+    'Bia mộ',
+    'Tưởng niệm binh sĩ đã ngã xuống. Xây một lần. (Chi phí là đề xuất.)',
+    {Res.wood: 20, Res.coins: 30},
+    takesAssignment: false,
   ),
 };
 
+/// Sức chứa kho đồ cộng thêm cho mỗi Hòm đồ (PROPOSED). Tổng sức chứa = [inventoryCapacityFor] + số hòm × giá trị này.
+const chestInventoryBonus = 10;
+
+/// Tất cả loại công trình đặt trong trại (đặt lên ô hoặc, với Hòm đồ, tự xếp vào khu chứa).
 const buildableFacilities = [
-  FacilityType.meleeYard,
-  FacilityType.archeryRange,
-  FacilityType.enduranceYard,
   FacilityType.infirmary,
+  FacilityType.archeryRange,
+  FacilityType.meleeYard,
+  FacilityType.storageChest,
+  FacilityType.enduranceYard,
+  FacilityType.gravestone,
+  FacilityType.barracks,
+];
+
+// ---- Catalog công trình xây trong trại: NGUỒN DUY NHẤT cho menu Build, BuildingsScreen và CampHub ----
+
+enum CampBuildingKind {
+  /// Công trình đặt trong trại, mỗi cái là một [Facility] (id riêng).
+  facility,
+
+  /// Công trình cấp bậc (cấp 0 = chưa xây, xây rồi chỉ nâng cấp), tối đa một.
+  tiered,
+}
+
+class CampBuildingDef {
+  const CampBuildingDef(this.id, this.kind, {this.facility, this.building});
+
+  /// Id ổn định, không phụ thuộc thứ tự danh sách hay tên hiển thị.
+  final String id;
+  final CampBuildingKind kind;
+  final FacilityType? facility;
+  final Building? building;
+
+  String get name => facilityDefs[facility]!.name;
+
+  String get blurb => facilityDefs[facility]!.blurb;
+
+  /// Số lượng tối đa trong trại (null = không giới hạn).
+  int? get maxCount => facilityDefs[facility]!.maxCount;
+}
+
+/// Đúng 7 loại công trình xây được trong trại. Quán rượu và Lò rèn (enum [Building]) thuộc thành phố,
+/// còn bếp lửa giữa trại chỉ là hình trang trí: cả ba KHÔNG nằm trong danh sách này.
+const campBuildings = <CampBuildingDef>[
+  CampBuildingDef(
+    'infirmary',
+    CampBuildingKind.facility,
+    facility: FacilityType.infirmary,
+  ),
+  CampBuildingDef(
+    'archery_range',
+    CampBuildingKind.facility,
+    facility: FacilityType.archeryRange,
+  ),
+  CampBuildingDef(
+    'melee_yard',
+    CampBuildingKind.facility,
+    facility: FacilityType.meleeYard,
+  ),
+  CampBuildingDef(
+    'storage_chest',
+    CampBuildingKind.facility,
+    facility: FacilityType.storageChest,
+  ),
+  CampBuildingDef(
+    'barracks',
+    CampBuildingKind.tiered,
+    facility: FacilityType.barracks,
+    building: Building.barracks,
+  ),
+  CampBuildingDef(
+    'stone_yard',
+    CampBuildingKind.facility,
+    facility: FacilityType.enduranceYard,
+  ),
+  CampBuildingDef(
+    'gravestone',
+    CampBuildingKind.facility,
+    facility: FacilityType.gravestone,
+  ),
 ];
 
 /// Số công trình tối đa trong trại (PROPOSED).

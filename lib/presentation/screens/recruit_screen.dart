@@ -9,7 +9,10 @@ import '../widgets/art.dart';
 import '../widgets/common.dart';
 
 class RecruitScreen extends StatelessWidget {
-  const RecruitScreen({super.key});
+  const RecruitScreen({super.key, this.vendorId});
+
+  /// Quán rượu đang chiêu mộ (UI thành phố); null = danh sách trong tab Tuyển mộ của shell.
+  final String? vendorId;
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +20,6 @@ class RecruitScreen extends StatelessWidget {
     final s = c.state!;
     final d = Dims(context);
     final cap = GameRules.rosterCap(s);
-    final nextRefresh = 3 - (s.day % 3);
     return Padding(
       padding: EdgeInsets.all(d.pad),
       child: Column(
@@ -41,7 +43,7 @@ class RecruitScreen extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  'Ứng viên mới sau $nextRefresh ngày',
+                  'Ứng viên (cấp 1–$tavernMaxCandidateLevel) làm mới mỗi ngày',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -54,13 +56,15 @@ class RecruitScreen extends StatelessWidget {
                 : GridView.builder(
                     gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: d.compact ? 300 : 360,
-                      mainAxisExtent: d.compact ? 196 : 200,
+                      mainAxisExtent: d.compact ? 212 : 216,
                       crossAxisSpacing: d.gap,
                       mainAxisSpacing: d.gap,
                     ),
                     itemCount: s.candidates.length,
-                    itemBuilder: (_, i) =>
-                        _Candidate(candidate: s.candidates[i]),
+                    itemBuilder: (_, i) => _Candidate(
+                      candidate: s.candidates[i],
+                      vendorId: vendorId,
+                    ),
                   ),
           ),
         ],
@@ -70,9 +74,10 @@ class RecruitScreen extends StatelessWidget {
 }
 
 class _Candidate extends StatelessWidget {
-  const _Candidate({required this.candidate});
+  const _Candidate({required this.candidate, this.vendorId});
 
   final Soldier candidate;
+  final String? vendorId;
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +90,7 @@ class _Candidate extends StatelessWidget {
     if (full) {
       lock = 'Doanh trại đã đầy';
     } else if (!GameRules.canAfford(s, {Res.coins: cost})) {
-      lock = 'Thiếu ${cost - s.res[Res.coins]!} đồng xu';
+      lock = 'Thiếu ${cost - s.res[Res.coins]!} vàng';
     }
     return Panel(
       fill: true,
@@ -144,11 +149,16 @@ class _Candidate extends StatelessWidget {
           ),
           const Spacer(),
           GameButton(
-            label: 'Tuyển • $cost đồng xu',
+            label: 'Tuyển • $cost vàng',
             dense: true,
             icon: Icons.paid,
             lockedReason: lock,
-            onPressed: () => toast(context, c.hire(candidate.id)),
+            onPressed: () => toast(
+              context,
+              vendorId == null
+                  ? c.hire(candidate.id)
+                  : c.hireAtTavern(vendorId!, candidate.id),
+            ),
           ),
         ],
       ),

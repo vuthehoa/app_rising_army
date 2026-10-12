@@ -27,13 +27,9 @@ void main() {
   tearDown(() => DevMode.enabled = false);
 
   group('Khởi tạo và xây dựng', () {
-    test('ván mới: đúng một bếp lửa; mọi công trình khác chưa xây', () {
+    test('ván mới: không có công trình nào (bếp lửa chỉ là trang trí); mọi công trình chưa xây', () {
       final s = GameRules.newGame(seed: 1);
-      expect(
-        s.facilities.where((f) => f.type == FacilityType.campfire),
-        hasLength(1),
-      );
-      expect(s.facilities, hasLength(1));
+      expect(s.facilities, isEmpty);
       for (final b in Building.values) {
         expect(s.buildings[b], 0, reason: '$b');
       }
@@ -49,7 +45,7 @@ void main() {
           GameRules.buildFacility(s, FacilityType.meleeYard, slot).ok,
           isTrue,
         );
-        expect(s.facilities, hasLength(2));
+        expect(s.facilities, hasLength(1));
         expect(
           s.res[Res.coins],
           coins - facilityDefs[FacilityType.meleeYard]!.cost[Res.coins]!,
@@ -58,11 +54,6 @@ void main() {
           GameRules.buildFacility(s, FacilityType.archeryRange, slot).ok,
           isFalse,
           reason: 'ô đã có công trình',
-        );
-        expect(
-          GameRules.buildFacility(s, FacilityType.campfire, 1).ok,
-          isFalse,
-          reason: 'không xây thêm bếp lửa',
         );
       },
     );
@@ -101,7 +92,10 @@ void main() {
       await seed.init();
       await seed.newGame(seed: 2);
       seed.state!.res.updateAll((_, _) => 999);
-      seed.upgradeBuilding(Building.barracks);
+      seed.chooseCampBuilding(
+        campBuildings.firstWhere((d) => d.id == 'barracks'),
+      );
+      seed.confirmPlacement(GameRules.freeSlotIndices(seed.state!).first);
       seed.upgradeBuilding(Building.barracks);
       await Future<void>.delayed(Duration.zero);
       final before = seed.state!.facilities.length;
@@ -111,10 +105,6 @@ void main() {
       final s = c.state!;
       expect(s.buildings[Building.barracks], 2);
       expect(s.facilities, hasLength(before));
-      expect(
-        s.facilities.where((f) => f.type == FacilityType.campfire),
-        hasLength(1),
-      );
       expect(s.buildings[Building.tavern], 0);
     });
 

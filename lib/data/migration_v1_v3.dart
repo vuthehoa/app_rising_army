@@ -5,7 +5,7 @@ import '../domain/rules.dart';
 /// Chuyển save v1 (quân theo số lượng) sang định dạng hiện hành (v3, từng binh sĩ có HP và công trình trong trại).
 /// - Mỗi đơn vị cũ (kể cả đang huấn luyện) thành một binh sĩ có id riêng, gắn trang bị cấp 1.
 /// - Công nghệ cũ cộng chỉ số cho binh sĩ; Canh nông đổi thành lương thực một lần.
-/// - Công trình sản xuất cũ không còn tồn tại: phần nâng cấp được hoàn thành đồng xu.
+/// - Công trình sản xuất cũ không còn tồn tại: phần nâng cấp được hoàn thành vàng.
 /// - Toàn bộ save v1 gốc được giữ trong trường `legacy` để không mất dữ liệu.
 /// Ném [FormatException] nếu dữ liệu v1 thiếu hoặc vô lý (khi đó repository giữ nguyên save gốc).
 Map<String, dynamic> migrateV1toV3(Map<String, dynamic> v1) {

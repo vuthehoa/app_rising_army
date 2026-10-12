@@ -11,7 +11,6 @@ void main() {
         for (final t in FacilityType.values) (s) => FacilityArt(t, size: s),
         (s) => MeleeYardArt(size: s),
         (s) => ArcheryRangeArt(size: s),
-        (s) => EnduranceYardArt(size: s),
         (s) => InfirmaryArt(size: s),
         (s) => CampfireArt(size: s),
         (s) => BarracksSceneArt(size: s),

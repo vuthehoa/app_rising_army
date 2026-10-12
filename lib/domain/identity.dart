@@ -10,11 +10,15 @@ import 'identity_catalog.dart';
 
 const int maxDisplayNameLength = 24;
 
+/// Độ dài tối đa của tên quân đoàn (sau khi cắt khoảng trắng); tối thiểu 1.
+const int maxLegionNameLength = 30;
+
 /// Ngưỡng tương phản tối thiểu (WCAG 1.4.11, thành phần phi văn bản) giữa huy hiệu và nền nó phủ lên.
 const double minEmblemContrast = 3.0;
 
 enum IdentityField {
   displayName,
+  legionName,
   appearance,
   template,
   pattern,
@@ -121,10 +125,17 @@ class LegionFlag {
 }
 
 class PlayerIdentity {
-  const PlayerIdentity({required this.avatar, required this.flag});
+  const PlayerIdentity({
+    required this.avatar,
+    required this.flag,
+    this.legionName = IdentityCatalog.defaultLegionName,
+  });
 
   final PlayerAvatar avatar;
   final LegionFlag flag;
+
+  /// Tên quân đoàn của người chơi (nguồn duy nhất; không nằm trong [LegionFlag]).
+  final String legionName;
 
   static const defaults = PlayerIdentity(
     avatar: PlayerAvatar.defaults,
@@ -135,11 +146,13 @@ class PlayerIdentity {
   PlayerIdentity trimmed() => PlayerIdentity(
     avatar: avatar.copyWith(displayName: avatar.displayName.trim()),
     flag: flag,
+    legionName: legionName.trim(),
   );
 
   Map<String, dynamic> toJson() => {
     'avatar': avatar.toJson(),
     'flag': flag.toJson(),
+    'legionName': legionName,
   };
 
   /// Đọc khi tải save: không bao giờ ném lỗi. Thiếu/hỏng/id không còn trong danh mục → mặc định
@@ -159,8 +172,16 @@ class PlayerIdentity {
     if (name.length > maxDisplayNameLength) {
       name = name.substring(0, maxDisplayNameLength).trimRight();
     }
+    // Save cũ không có tên quân đoàn → mặc định.
+    final rawLegion = j['legionName'];
+    var legion = rawLegion is String ? rawLegion.trim() : '';
+    if (legion.isEmpty) legion = IdentityCatalog.defaultLegionName;
+    if (legion.length > maxLegionNameLength) {
+      legion = legion.substring(0, maxLegionNameLength).trimRight();
+    }
     const d = LegionFlag.defaults;
     return PlayerIdentity(
+      legionName: legion,
       avatar: PlayerAvatar(
         displayName: name,
         appearanceId: pick(
@@ -204,6 +225,7 @@ const _unset = Object();
 class IdentityDraft {
   const IdentityDraft({
     this.displayName,
+    this.legionName = IdentityCatalog.defaultLegionName,
     this.appearanceId,
     this.templateId,
     this.patternId,
@@ -217,6 +239,7 @@ class IdentityDraft {
   /// (bắt buộc người chơi nhập).
   factory IdentityDraft.initial() => IdentityDraft(
     displayName: '',
+    legionName: IdentityCatalog.defaultLegionName,
     appearanceId: PlayerAvatar.defaults.appearanceId,
     templateId: LegionFlag.defaults.templateId,
     patternId: LegionFlag.defaults.patternId,
@@ -228,6 +251,7 @@ class IdentityDraft {
 
   factory IdentityDraft.from(PlayerIdentity i) => IdentityDraft(
     displayName: i.avatar.displayName,
+    legionName: i.legionName,
     appearanceId: i.avatar.appearanceId,
     templateId: i.flag.templateId,
     patternId: i.flag.patternId,
@@ -238,6 +262,7 @@ class IdentityDraft {
   );
 
   final String? displayName;
+  final String? legionName;
   final String? appearanceId;
   final String? templateId;
   final String? patternId;
@@ -249,6 +274,7 @@ class IdentityDraft {
   /// Truyền giá trị để đổi; truyền `null` tường minh để bỏ chọn; bỏ qua để giữ nguyên.
   IdentityDraft copyWith({
     Object? displayName = _unset,
+    Object? legionName = _unset,
     Object? appearanceId = _unset,
     Object? templateId = _unset,
     Object? patternId = _unset,
@@ -260,6 +286,9 @@ class IdentityDraft {
     displayName: identical(displayName, _unset)
         ? this.displayName
         : displayName as String?,
+    legionName: identical(legionName, _unset)
+        ? this.legionName
+        : legionName as String?,
     appearanceId: identical(appearanceId, _unset)
         ? this.appearanceId
         : appearanceId as String?,
@@ -285,6 +314,7 @@ class IdentityDraft {
   PlayerIdentity? toIdentity() {
     if (validateIdentityDraft(this).isNotEmpty) return null;
     return PlayerIdentity(
+      legionName: legionName!.trim(),
       avatar: PlayerAvatar(
         displayName: displayName!.trim(),
         appearanceId: appearanceId!,
@@ -348,6 +378,27 @@ List<IdentityIssue> validateIdentityDraft(IdentityDraft d) {
     out.add(
       const IdentityIssue(
         IdentityField.displayName,
+        IdentityIssueCode.nameTooLong,
+      ),
+    );
+  }
+
+  final legion = d.legionName?.trim();
+  if (d.legionName == null) {
+    out.add(
+      const IdentityIssue(IdentityField.legionName, IdentityIssueCode.missing),
+    );
+  } else if (legion!.isEmpty) {
+    out.add(
+      const IdentityIssue(
+        IdentityField.legionName,
+        IdentityIssueCode.nameEmpty,
+      ),
+    );
+  } else if (legion.length > maxLegionNameLength) {
+    out.add(
+      const IdentityIssue(
+        IdentityField.legionName,
         IdentityIssueCode.nameTooLong,
       ),
     );

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
+import '../../domain/item_grade.dart';
 import '../../domain/models.dart';
 import 'buildings/buildings.dart';
 
@@ -310,12 +311,17 @@ class _ItemPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
-    final slotBg = Paint()..color = Pal.ink;
+    final it = id == null ? null : itemDefs[id];
+    // Nền phẩm cấp dùng chung (xem domain/item_grade.dart); Level 1 giữ nền mặc định.
+    final gradeArgb = it == null ? null : gradeBackgroundArgb(it.grade);
+    final slotBg = Paint()
+      ..color = gradeArgb == null
+          ? Pal.ink
+          : Color.alphaBlend(Color(gradeArgb).withValues(alpha: 0.85), Pal.ink);
     canvas.drawRRect(
       RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(w * 0.15)),
       slotBg,
     );
-    final it = id == null ? null : itemDefs[id];
     if (it == null) {
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -329,12 +335,15 @@ class _ItemPainter extends CustomPainter {
       );
       return;
     }
-    final c = [
+    final c = const [
       Pal.dim,
-      const Color(0xFFB08A55),
-      const Color(0xFFB4C0C8),
+      Color(0xFFB08A55),
+      Color(0xFFB4C0C8),
       Pal.gold,
-    ][it.tier];
+      Color(0xFFE6E0D0),
+      Color(0xFFF1EBDD),
+      Color(0xFFFFF4DA),
+    ][it.tier.clamp(0, 6)];
     final p = Paint()
       ..color = c
       ..strokeWidth = w * 0.09
@@ -400,6 +409,28 @@ class _ItemPainter extends CustomPainter {
             ..color = Pal.ink
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5,
+        );
+      case Slot.shield:
+        final path = Path()
+          ..moveTo(w * 0.5, h * 0.14)
+          ..lineTo(w * 0.8, h * 0.26)
+          ..quadraticBezierTo(w * 0.8, h * 0.7, w * 0.5, h * 0.88)
+          ..quadraticBezierTo(w * 0.2, h * 0.7, w * 0.2, h * 0.26)
+          ..close();
+        canvas.drawPath(path, f);
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Pal.ink
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5,
+        );
+        canvas.drawLine(
+          Offset(w * 0.5, h * 0.2),
+          Offset(w * 0.5, h * 0.8),
+          Paint()
+            ..color = Pal.ink
+            ..strokeWidth = 1.2,
         );
       case Slot.accessory:
         canvas.drawCircle(Offset(w * 0.5, h * 0.55), w * 0.24, p);
@@ -543,7 +574,14 @@ class CampPainter extends CustomPainter {
     ); // đơn vị kích thước, co theo chiều rộng khi khung hẹp
     switch (b) {
       case BuildingSpot.barracks:
-        paintBarracksScene(canvas, p, u);
+        // Doanh trại vẽ trong ô vuông cạnh `side` có góc trên-trái làm gốc: đặt đáy ô ngang chân các
+        // công trình khác (p.dy + 0.5u) và căn giữa theo p.dx.
+        final side = u * 3.6;
+        paintBarracksScene(
+          canvas,
+          Offset(p.dx - side / 2, p.dy + u * 0.5 - side * 0.93),
+          side,
+        );
       case BuildingSpot.trainingGround:
         paintTrainingGroundScene(canvas, p, u);
       case BuildingSpot.infirmary:

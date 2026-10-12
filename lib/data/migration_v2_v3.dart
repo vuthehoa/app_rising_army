@@ -107,9 +107,8 @@ Map<String, dynamic> migrateV2toV3(Map<String, dynamic> v2) {
     Facility(id: 1, type: FacilityType.meleeYard, x: 0.27, y: 0.4),
     Facility(id: 2, type: FacilityType.archeryRange, x: 0.5, y: 0.3),
     Facility(id: 3, type: FacilityType.infirmary, x: 0.76, y: 0.4),
-    Facility(id: 4, type: FacilityType.campfire, x: 0.5, y: 0.64),
   ];
-  var nextId = 5;
+  var nextId = 4;
   var slot = 4;
   void extra(FacilityType t) {
     final p = GameRules.facilitySlots[slot++];

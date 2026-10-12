@@ -163,7 +163,8 @@ void main() {
       final n = c.state!.facilities.length;
       await tester.tap(find.text('build'));
       await tester.pumpAndSettle();
-      await tapText(tester, 'Bãi bắn cung');
+      await tester.tap(find.byKey(const ValueKey('camp-build-archery_range')));
+      await tester.pumpAndSettle();
       expect(find.textContaining('Chạm một ô vàng'), findsOneWidget);
       await tester.tap(find.text('Đặt Bãi bắn cung').first);
       await tester.pumpAndSettle();
@@ -230,7 +231,7 @@ void main() {
     expect(GameRules.byStatus(c.state!, MissionStatus.active).length, 1);
   });
 
-  testWidgets('xây dựng: nâng cấp công trình và mua đồ ở lò rèn', (
+  testWidgets('xây dựng: xây Doanh trại từ danh sách công trình trại', (
     tester,
   ) async {
     final c = await boot(tester, newGame: true);
@@ -239,7 +240,8 @@ void main() {
     await tester.pumpAndSettle();
     await tapText(tester, 'Xây dựng');
     final before = c.state!.buildings.values.fold(0, (a, b) => a + b);
-    await tapText(tester, 'Nâng cấp');
+    await tester.tap(find.byKey(const ValueKey('camp-build-barracks')));
+    await tester.pumpAndSettle();
     expect(c.state!.buildings.values.fold(0, (a, b) => a + b), before + 1);
   });
 

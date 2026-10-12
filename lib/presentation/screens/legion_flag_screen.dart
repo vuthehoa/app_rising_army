@@ -68,14 +68,34 @@ class LegionFlagScreen extends StatelessWidget {
                             // CỜ: 4/9 CHIỀU NGANG
                             Expanded(
                               flex: 4,
-                              child: Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(4),
-                                  child: FlagPreviewPanel(
-                                    flag: flag,
-                                    onRandomize: flow.randomizeFlag,
-                                  ),
-                                ),
+                              child: LayoutBuilder(
+                                builder: (context, box) =>
+                                    SingleChildScrollView(
+                                      physics: const BouncingScrollPhysics(),
+                                      child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          minHeight: box.maxHeight,
+                                        ),
+                                        child: Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(4),
+                                            child: FlagPreviewPanel(
+                                              flag: flag,
+                                              onRandomize: flow.randomizeFlag,
+                                              legionName:
+                                                  draft.legionName ?? '',
+                                              onLegionNameChanged: (v) =>
+                                                  flow.update(
+                                                    (d) => d.copyWith(
+                                                      legionName: v,
+                                                    ),
+                                                  ),
+                                              nameError: _nameError(flow),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                               ),
                             ),
 
@@ -251,6 +271,16 @@ class LegionFlagScreen extends StatelessWidget {
   // ---------------------------------------------------------------------------
   // Chuyển lựa chọn
   // ---------------------------------------------------------------------------
+
+  static String? _nameError(NewGameFlow flow) {
+    for (final i in flow.flagIssues) {
+      if (i.field != IdentityField.legionName) continue;
+      return i.code == IdentityIssueCode.nameTooLong
+          ? 'Tối đa $maxLegionNameLength ký tự.'
+          : 'Hãy nhập tên quân đoàn.';
+    }
+    return null;
+  }
 
   static void _cycleTemplate(NewGameFlow flow, int direction) {
     final items = IdentityCatalog.templates;

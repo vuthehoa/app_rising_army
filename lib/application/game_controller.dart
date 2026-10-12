@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/save_repository.dart';
 import '../domain/battle.dart';
+import '../domain/catalog.dart';
 import '../domain/dev_mode.dart';
 import '../domain/identity.dart';
 import '../domain/map_anchor.dart';
@@ -74,6 +75,11 @@ class GameController extends ChangeNotifier {
   void continueGame() {
     _state = _pendingSave;
     freshGame = false;
+    _placing = null;
+    // Save cũ có Doanh trại cấp > 0 nhưng chưa có instance trong trại: tạo để trại hiển thị đúng.
+    if (_state != null && GameRules.syncBarracksInstance(_state!)) {
+      _persist();
+    }
     notifyListeners();
   }
 
@@ -83,6 +89,7 @@ class GameController extends ChangeNotifier {
     );
     lastDayReport = null;
     lastExpedition = null;
+    _placing = null;
     await _persist();
     notifyListeners();
   }
@@ -126,12 +133,62 @@ class GameController extends ChangeNotifier {
   ActionResult upgradeBuilding(Building b) =>
       _apply(() => GameRules.upgradeBuilding(_state!, b));
   ActionResult hire(int id) => _apply(() => GameRules.hire(_state!, id));
+
+  /// Chiêu mộ tại Quán rượu (đường dùng cho UI): xác thực vị trí/quán rồi dùng đúng luật [hire].
+  ActionResult hireAtTavern(String vendorId, int candidateId) =>
+      _apply(() => GameRules.hireAtTavern(_state!, vendorId, candidateId));
   ActionResult rename(int id, String n) =>
       _apply(() => GameRules.rename(_state!, id, n));
   ActionResult assignToFacility(int soldier, int facility) =>
       _apply(() => GameRules.assignToFacility(_state!, soldier, facility));
   ActionResult unassign(int soldier) =>
       _apply(() => GameRules.unassign(_state!, soldier));
+
+  // ---------- Xây dựng trong trại: chọn công trình → chọn vị trí → xác nhận ----------
+
+  FacilityType? _placing;
+
+  /// Công trình đang chờ người chơi chọn vị trí trong trại (null = không ở chế độ đặt). Trạng thái UI,
+  /// không nằm trong save; mọi giao diện (menu Build, BuildingsScreen) dùng chung để CampHub hiển thị ô đặt.
+  FacilityType? get placing => _placing;
+
+  /// Chọn một mục của catalog trại. XÂY MỚI chỉ bắt đầu chế độ đặt (chưa trừ gì, chưa đổi state);
+  /// NÂNG CẤP (Doanh trại đã xây) thực hiện ngay qua luật. Trả về kết quả để UI báo.
+  ActionResult chooseCampBuilding(CampBuildingDef d) {
+    final s = _state!;
+    final st = GameRules.campStatus(s, d);
+    if (!st.canAct) {
+      return ActionResult.fail(st.reason ?? 'Không thể xây.');
+    }
+    if (!st.needsPlacement) return upgradeBuilding(d.building!);
+    _placing = d.facility;
+    notifyListeners();
+    return ActionResult.ok(
+      'Chọn vị trí trong trại để đặt ${facilityDefs[d.facility]!.name}.',
+    );
+  }
+
+  void cancelPlacement() {
+    if (_placing == null) return;
+    _placing = null;
+    notifyListeners();
+  }
+
+  /// Xác nhận đặt công trình đang chờ tại vị trí [index]. Luật xác thực lại mọi điều kiện; chỉ khi hợp lệ
+  /// mới trừ tài nguyên và tạo công trình. Luôn thoát chế độ đặt (chống bấm lặp).
+  ActionResult confirmPlacement(int index) {
+    final type = _placing;
+    if (type == null) {
+      return const ActionResult.fail('Chưa chọn công trình để xây.');
+    }
+    _placing = null;
+    final r = _apply(() => GameRules.buildFacility(_state!, type, index));
+    if (!r.ok) {
+      notifyListeners();
+    }
+    return r;
+  }
+
   ActionResult buildFacility(FacilityType type, int slot) =>
       _apply(() => GameRules.buildFacility(_state!, type, slot));
   ActionResult equip(int id, String item) =>

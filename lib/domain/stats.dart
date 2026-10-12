@@ -63,10 +63,11 @@ Derived deriveStats(Soldier s, {Map<Slot, String?>? override}) {
       : s.equipped(sl);
   final weapon = _item(at(Slot.weapon));
   final armor = _item(at(Slot.armor));
+  final shield = _item(at(Slot.shield));
   final acc = _item(at(Slot.accessory));
 
   final total = {for (final st in Stat.values) st: s.stats[st]!};
-  for (final it in [weapon, armor, acc]) {
+  for (final it in [weapon, armor, shield, acc]) {
     if (it == null) continue;
     it.bonus.forEach((k, v) => total[k] = total[k]! + v);
   }
@@ -79,7 +80,7 @@ Derived deriveStats(Soldier s, {Map<Slot, String?>? override}) {
   };
 
   var attack = (weapon?.damage ?? 1) + primary * 0.8;
-  var defense = (armor?.defense ?? 0) + con * 0.15;
+  var defense = (armor?.defense ?? 0) + (shield?.defense ?? 0) + con * 0.15;
   var hp = 24 + con * 3 + s.level * 4;
   var accuracy = 0.62 + dex * 0.012;
 
@@ -93,6 +94,7 @@ Derived deriveStats(Soldier s, {Map<Slot, String?>? override}) {
   final speedMods =
       (weapon?.speed ?? 0) +
       (armor?.speed ?? 0) +
+      (shield?.speed ?? 0) +
       (acc?.speed ?? 0) +
       (s.trait == TraitId.nimble ? 1 : 0);
   var speed = 2.2 + dex * 0.12 + speedMods * speedPerPoint;

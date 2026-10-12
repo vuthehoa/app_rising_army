@@ -14,6 +14,12 @@ GameState inCity(String city, {int coins = 1000, int seed = 7}) {
   final s = fresh(seed);
   s.visiting = city;
   s.res[Res.coins] = coins;
+  // Hàng Lò rèn thay đổi theo ngày; các test giao dịch cần hàng xác định nên bày đủ kho tối đa.
+  for (final v in vendorsIn(city).where((v) => v.kind == VendorKind.smithy)) {
+    GameRules.stockOf(s, v)
+      ..items.clear()
+      ..items.addAll(v.items);
+  }
   return s;
 }
 
@@ -30,7 +36,12 @@ void main() {
         for (final id in v.items.keys) {
           expect(itemDefs.containsKey(id), isTrue, reason: '${v.id}/$id');
         }
-        expect(v.items.isNotEmpty || v.resources.isNotEmpty, isTrue);
+        expect(
+          v.kind == VendorKind.tavern ||
+              v.items.isNotEmpty ||
+              v.resources.isNotEmpty,
+          isTrue,
+        );
       }
     });
 
@@ -137,7 +148,7 @@ void main() {
       expect(GameRules.missionCurrent(s, m), 0);
       for (final so in s.roster.take(4)) {
         expect(
-          GameRules.buyAndEquip(s, 'g_tailor', 'leather_armor', so.id).ok,
+          GameRules.buyAndEquip(s, 'g_smith', 'leather_armor', so.id).ok,
           isTrue,
           reason: so.name,
         );
@@ -229,15 +240,15 @@ void main() {
             1;
         expect(GameRules.inventoryCount(s), cap - 1);
         expect(
-          GameRules.buyFromVendor(s, 'g_tailor', 'leather_armor', 2).ok,
+          GameRules.buyFromVendor(s, 'g_smith', 'leather_armor', 2).ok,
           isFalse,
         );
         expect(
-          GameRules.buyFromVendor(s, 'g_tailor', 'leather_armor', 1).ok,
+          GameRules.buyFromVendor(s, 'g_smith', 'leather_armor', 1).ok,
           isTrue,
         );
         expect(GameRules.inventoryCount(s), cap);
-        final r = GameRules.buyFromVendor(s, 'g_tailor', 'leather_armor', 1);
+        final r = GameRules.buyFromVendor(s, 'g_smith', 'leather_armor', 1);
         expect(r.ok, isFalse);
         expect(r.message, contains('Kho đồ đầy'));
         expect(
@@ -249,36 +260,31 @@ void main() {
 
     test('không ở trong thành phố đó thì không giao dịch được (không có mua từ xa)', () {
       final s = fresh()..res[Res.coins] = 1000;
-      expect(
-        GameRules.buyFromVendor(s, 'g_smith', 'wooden_spear', 1).ok,
-        isFalse,
-      );
+      final item = GameRules.peekStock(
+        s,
+        vendorById('g_smith')!,
+      ).items.keys.first;
+      expect(GameRules.buyFromVendor(s, 'g_smith', item, 1).ok, isFalse);
       s.visiting = 'a_city';
-      expect(
-        GameRules.buyFromVendor(s, 'g_smith', 'wooden_spear', 1).ok,
-        isFalse,
-      );
+      expect(GameRules.buyFromVendor(s, 'g_smith', item, 1).ok, isFalse);
       s.visiting = 'g_town';
-      expect(
-        GameRules.buyFromVendor(s, 'g_smith', 'wooden_spear', 1).ok,
-        isTrue,
-      );
+      expect(GameRules.buyFromVendor(s, 'g_smith', item, 1).ok, isTrue);
       GameRules.leaveCity(s);
-      expect(
-        GameRules.buyFromVendor(s, 'g_smith', 'wooden_spear', 1).ok,
-        isFalse,
-      );
+      expect(GameRules.buyFromVendor(s, 'g_smith', item, 1).ok, isFalse);
       expect(GameRules.leaveCity(s).ok, isFalse);
     });
 
-    test('người bán khóa theo tiến trình: Thợ giáp Tro cần 3 nhiệm vụ', () {
-      final s = inCity('a_city');
+    test('người bán khóa theo tiến trình: Chợ đen Đầm Đen cần 3 nhiệm vụ', () {
+      final s = inCity('m_port');
       s.missionsCompleted = 0; // bậc 0 nhưng đang ở thành phố (kiểm tra riêng điều kiện người bán)
-      final r = GameRules.buyFromVendor(s, 'a_armor', 'chain_mail', 1);
+      final r = GameRules.buyFromVendor(s, 'm_black', 'plate_armor', 1);
       expect(r.ok, isFalse);
       expect(r.message, contains('chưa mở cửa'));
       s.missionsCompleted = 3;
-      expect(GameRules.buyFromVendor(s, 'a_armor', 'chain_mail', 1).ok, isTrue);
+      expect(
+        GameRules.buyFromVendor(s, 'm_black', 'plate_armor', 1).ok,
+        isTrue,
+      );
     });
 
     test('game over/chiến thắng chặn mọi giao dịch', () {
@@ -331,7 +337,7 @@ void main() {
       final old = so.armorId!;
       final had = s.inventory[old] ?? 0;
       expect(
-        GameRules.buyAndEquip(s, 'g_tailor', 'leather_armor', so.id).ok,
+        GameRules.buyAndEquip(s, 'g_smith', 'leather_armor', so.id).ok,
         isTrue,
       );
       expect(so.armorId, 'leather_armor');
@@ -344,11 +350,11 @@ void main() {
       final s = inCity('g_town');
       s.inventory['padded_armor'] = 5;
       final coins = s.res[Res.coins]!;
-      final r = GameRules.sellToVendor(s, 'g_tailor', 'padded_armor', 3);
+      final r = GameRules.sellToVendor(s, 'g_smith', 'padded_armor', 3);
       expect(r.ok, isTrue);
       expect(s.res[Res.coins], coins + 3 * GameRules.sellPrice('padded_armor'));
       expect(s.inventory['padded_armor'], 2);
-      final st = GameRules.stockOf(s, vendorById('g_tailor')!);
+      final st = GameRules.stockOf(s, vendorById('g_smith')!);
       expect(st.items['padded_armor']! <= 12, isTrue);
     });
 
@@ -358,16 +364,16 @@ void main() {
       s.inventory['padded_armor'] = 0;
       final before = jsonEncode(s.toJson());
       expect(
-        GameRules.sellToVendor(s, 'g_tailor', 'padded_armor', 1).ok,
+        GameRules.sellToVendor(s, 'g_smith', 'padded_armor', 1).ok,
         isFalse,
       ); // đang mặc, kho 0
       expect(
-        GameRules.sellToVendor(s, 'g_smith', 'padded_armor', 1).ok,
+        GameRules.sellToVendor(s, 'g_market', 'padded_armor', 1).ok,
         isFalse,
-      ); // thợ rèn không mua giáp
-      expect(GameRules.sellToVendor(s, 'g_tailor', 'khong_co', 1).ok, isFalse);
+      ); // Chợ không mua trang bị
+      expect(GameRules.sellToVendor(s, 'g_smith', 'khong_co', 1).ok, isFalse);
       expect(
-        GameRules.sellToVendor(s, 'g_tailor', 'padded_armor', 0).ok,
+        GameRules.sellToVendor(s, 'g_smith', 'padded_armor', 0).ok,
         isFalse,
       );
       expect(jsonEncode(s.toJson()), before);
@@ -431,29 +437,6 @@ void main() {
     });
   });
 
-  group('Tái cung hàng', () {
-    test(
-      'sau mỗi $restockEveryDays ngày hàng đã bán tăng thêm 1/3 tối đa, không vượt mức tối đa',
-      () {
-        final s = inCity('g_town', coins: 9999);
-        final v = vendorById('g_tailor')!;
-        expect(
-          GameRules.buyFromVendor(s, 'g_tailor', 'padded_armor', 6).ok,
-          isTrue,
-        );
-        expect(GameRules.stockOf(s, v).items['padded_armor'], 0);
-        for (var i = 0; i < restockEveryDays; i++) {
-          GameRules.tickDay(s);
-        }
-        expect(GameRules.stockOf(s, v).items['padded_armor'], (6 / 3).ceil());
-        for (var i = 0; i < restockEveryDays * 5; i++) {
-          GameRules.tickDay(s);
-        }
-        expect(GameRules.stockOf(s, v).items['padded_armor'], 6);
-      },
-    );
-  });
-
   group('Lưu game và tương thích save v2', () {
     test('phiên bản save hiện hành là 3 (Phase 4); các trường cửa hàng vẫn là tùy chọn', () {
       expect(SaveRepository.latestVersion, 3);
@@ -496,10 +479,11 @@ void main() {
       expect(l.visiting, isNull);
       l.visiting = 'g_town';
       l.res[Res.coins] = 500;
-      expect(
-        GameRules.buyFromVendor(l, 'g_smith', 'wooden_spear', 1).ok,
-        isTrue,
-      );
+      final item = GameRules.peekStock(
+        l,
+        vendorById('g_smith')!,
+      ).items.keys.first;
+      expect(GameRules.buyFromVendor(l, 'g_smith', item, 1).ok, isTrue);
     });
 
     test('dữ liệu cửa hàng vô lý bị từ chối', () {

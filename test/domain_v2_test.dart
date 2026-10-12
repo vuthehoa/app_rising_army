@@ -203,43 +203,37 @@ void main() {
     Facility fac(GameState s, FacilityType t) =>
         s.facilities.firstWhere((f) => f.type == t);
 
-    test('ván mới chỉ có bếp lửa trại; mọi công trình khác chưa xây', () {
+    test('ván mới không có công trình nào (bếp lửa chỉ là trang trí); mọi công trình chưa xây', () {
       final s = GameRules.newGame(seed: 7);
-      expect(s.facilities.map((f) => f.type), [FacilityType.campfire]);
-      expect(s.facilities.single.assigned, isEmpty);
+      expect(s.facilities, isEmpty);
       expect(s.buildings.values.every((l) => l == 0), isTrue);
     });
 
-    test('gán binh sĩ vào công trình: sức chứa 3, tự rút khỏi công trình cũ, bếp lửa không nhận gán', () {
-      final s = fresh();
-      final yard = fac(s, FacilityType.meleeYard);
-      final ids = s.roster.map((e) => e.id).toList();
-      for (final id in ids.take(3)) {
-        expect(GameRules.assignToFacility(s, id, yard.id).ok, isTrue);
-      }
-      expect(yard.assigned.length, Facility.capacity);
-      expect(GameRules.assignToFacility(s, ids[3], yard.id).ok, isFalse);
-      final bow = fac(s, FacilityType.archeryRange);
-      expect(GameRules.assignToFacility(s, ids[0], bow.id).ok, isTrue);
-      expect(yard.assigned.contains(ids[0]), isFalse);
-      expect(bow.assigned, [ids[0]]);
-      expect(
-        GameRules.assignToFacility(
-          s,
-          ids[0],
-          fac(s, FacilityType.campfire).id,
-        ).ok,
-        isFalse,
-      );
-      expect(
-        GameRules.assignToFacility(s, ids[0], bow.id).ok,
-        isFalse,
-      ); // đã ở đó
-      expect(GameRules.assignToFacility(s, 999, bow.id).ok, isFalse);
-      expect(GameRules.assignToFacility(s, ids[1], 999).ok, isFalse);
-      expect(GameRules.unassign(s, ids[0]).ok, isTrue);
-      expect(GameRules.unassign(s, ids[0]).ok, isFalse);
-    });
+    test(
+      'gán binh sĩ vào công trình: sức chứa 3, tự rút khỏi công trình cũ, ',
+      () {
+        final s = fresh();
+        final yard = fac(s, FacilityType.meleeYard);
+        final ids = s.roster.map((e) => e.id).toList();
+        for (final id in ids.take(3)) {
+          expect(GameRules.assignToFacility(s, id, yard.id).ok, isTrue);
+        }
+        expect(yard.assigned.length, Facility.capacity);
+        expect(GameRules.assignToFacility(s, ids[3], yard.id).ok, isFalse);
+        final bow = fac(s, FacilityType.archeryRange);
+        expect(GameRules.assignToFacility(s, ids[0], bow.id).ok, isTrue);
+        expect(yard.assigned.contains(ids[0]), isFalse);
+        expect(bow.assigned, [ids[0]]);
+        expect(
+          GameRules.assignToFacility(s, ids[0], bow.id).ok,
+          isFalse,
+        ); // đã ở đó
+        expect(GameRules.assignToFacility(s, 999, bow.id).ok, isFalse);
+        expect(GameRules.assignToFacility(s, ids[1], 999).ok, isFalse);
+        expect(GameRules.unassign(s, ids[0]).ok, isTrue);
+        expect(GameRules.unassign(s, ids[0]).ok, isFalse);
+      },
+    );
 
     test('huấn luyện: tiến độ % theo ngày, đủ 100% thì +1 thuộc tính và XP; chỉ đúng thuộc tính của công trình', () {
       final s = fresh();
@@ -305,31 +299,42 @@ void main() {
         GameRules.buildFacility(s, FacilityType.meleeYard, free.first).ok,
         isFalse,
       ); // ô đã có
-      expect(
-        GameRules.buildFacility(s, FacilityType.campfire, free[1]).ok,
-        isFalse,
-      ); // không xây được
       s.res.updateAll((_, _) => 0);
       expect(
         GameRules.buildFacility(s, FacilityType.infirmary, free[1]).ok,
         isFalse,
       ); // thiếu tài nguyên
       s.res.updateAll((_, _) => 9999);
-      var i = 1;
-      while (s.facilities.length < maxFacilities &&
-          GameRules.freeSlotIndices(s).isNotEmpty) {
+      // Mỗi loại chỉ xây được một lần (trại dựng sẵn đã có bãi cận chiến, bãi bắn cung, lều cứu thương).
+      for (final t in [
+        FacilityType.infirmary,
+        FacilityType.archeryRange,
+        FacilityType.meleeYard,
+        FacilityType.enduranceYard,
+      ]) {
         expect(
-          GameRules.buildFacility(
-            s,
-            FacilityType.infirmary,
-            GameRules.freeSlotIndices(s).first,
-          ).ok,
-          isTrue,
-          reason: 'lần $i',
+          GameRules.buildFacility(s, t, GameRules.freeSlotIndices(s).first).ok,
+          isFalse,
+          reason: '$t đã xây',
         );
-        i++;
       }
-      expect(GameRules.buildFacility(s, FacilityType.infirmary, 0).ok, isFalse);
+      expect(
+        GameRules.buildFacility(
+          s,
+          FacilityType.gravestone,
+          GameRules.freeSlotIndices(s).first,
+        ).ok,
+        isTrue,
+      );
+      expect(
+        GameRules.buildFacility(
+          s,
+          FacilityType.storageChest,
+          GameRules.freeChestSpotIndices(s).first,
+        ).ok,
+        isTrue,
+      );
+      expect(GameRules.slotFacilityCount(s), lessThanOrEqualTo(maxFacilities));
     });
 
     test('kinh nghiệm lên cấp, tăng chỉ số theo vai trò, Học nhanh +30%', () {

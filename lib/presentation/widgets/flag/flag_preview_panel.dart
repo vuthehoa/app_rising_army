@@ -3,18 +3,54 @@
 // =============================================================================
 
 import 'package:app_rising_army/domain/identity.dart';
+import 'package:flutter/services.dart';
 import 'package:app_rising_army/presentation/widgets/flag/flag_view.dart';
 import 'package:flutter/material.dart';
 
-class FlagPreviewPanel extends StatelessWidget {
+class FlagPreviewPanel extends StatefulWidget {
   const FlagPreviewPanel({
     super.key,
     required this.flag,
     required this.onRandomize,
+    required this.legionName,
+    required this.onLegionNameChanged,
+    this.nameError,
   });
 
   final LegionFlag flag;
   final VoidCallback onRandomize;
+
+  /// Tên quân đoàn hiện tại (nguồn là state của màn tạo game; panel không giữ bản riêng).
+  final String legionName;
+  final ValueChanged<String> onLegionNameChanged;
+  final String? nameError;
+
+  @override
+  State<FlagPreviewPanel> createState() => _FlagPreviewPanelState();
+}
+
+class _FlagPreviewPanelState extends State<FlagPreviewPanel> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.legionName,
+  );
+
+  @override
+  void didUpdateWidget(FlagPreviewPanel old) {
+    super.didUpdateWidget(old);
+    // Đồng bộ khi state đổi từ bên ngoài (random). Gõ tay thì giá trị đã bằng nhau nên không động tới con trỏ.
+    if (widget.legionName != _name.text) {
+      _name.value = TextEditingValue(
+        text: widget.legionName,
+        selection: TextSelection.collapsed(offset: widget.legionName.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
 
   static const Color _panel = Color(0xFF22251E);
   static const Color _gold = Color(0xFFD4AF37);
@@ -23,10 +59,10 @@ class FlagPreviewPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final composition = composeFlag(flag);
+    final composition = composeFlag(widget.flag);
 
     return Container(
-      height: 214,
+      height: 250,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
         color: _panel,
@@ -77,7 +113,7 @@ class FlagPreviewPanel extends StatelessWidget {
               child: InkWell(
                 key: const ValueKey('randomize-flag'),
                 customBorder: const StadiumBorder(),
-                onTap: onRandomize,
+                onTap: widget.onRandomize,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     minHeight: 44,
@@ -105,6 +141,41 @@ class FlagPreviewPanel extends StatelessWidget {
                       ],
                     ),
                   ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 56,
+            child: TextField(
+              key: const ValueKey('legion-name-field'),
+              controller: _name,
+              onChanged: widget.onLegionNameChanged,
+              maxLength: maxLegionNameLength,
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(maxLegionNameLength),
+              ],
+              textInputAction: TextInputAction.done,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                counterText: '',
+                labelText: 'Tên quân đoàn',
+                hintText: 'Nhập tên quân đoàn...',
+                errorText: widget.nameError,
+                errorStyle: const TextStyle(fontSize: 9, height: 0.8),
+                labelStyle: const TextStyle(color: _muted, fontSize: 12),
+                hintStyle: const TextStyle(color: _muted, fontSize: 12),
+                filled: true,
+                fillColor: Colors.black.withValues(alpha: 0.25),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _gold),
                 ),
               ),
             ),

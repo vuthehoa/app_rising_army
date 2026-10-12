@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../data/legion_names.dart';
 import '../domain/flag_randomizer.dart';
 import '../domain/identity.dart';
 import 'game_controller.dart';
@@ -58,7 +59,8 @@ class NewGameFlow extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Thay toàn bộ cấu hình quân kỳ bằng một mẫu ngẫu nhiên hợp lệ. Giữ nguyên tên và avatar.
+  /// Random một lần cả quân kỳ và tên quân đoàn (cập nhật cùng một lần, một thông báo). Giữ nguyên
+  /// tên nhân vật và avatar.
   void randomizeFlag({Random? random}) {
     final d = _draft;
     final previous = LegionFlag(
@@ -70,9 +72,12 @@ class NewGameFlow extends ChangeNotifier {
           d.secondaryColorId ?? LegionFlag.defaults.secondaryColorId,
       emblemColorId: d.emblemColorId ?? LegionFlag.defaults.emblemColorId,
     );
-    final f = randomLegionFlag(random ?? Random(), previous: previous);
+    final rng = random ?? Random();
+    final f = randomLegionFlag(rng, previous: previous);
+    final legion = LegionNameGenerator.generate(rng, avoid: d.legionName);
     update(
       (c) => c.copyWith(
+        legionName: legion,
         templateId: f.templateId,
         patternId: f.patternId,
         emblemId: f.emblemId,
