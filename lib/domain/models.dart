@@ -1,0 +1,455 @@
+enum Res { food, coins, wood, iron }
+
+enum Role { spearman, archer, cavalry }
+
+enum Stat { str, dex, spd, con }
+
+enum Slot { weapon, armor, accessory }
+
+enum TraitId { none, bornLeader, brutal, tough, nimble, quickLearner, coward }
+
+enum SoldierStatus { active, dead, deserted }
+
+enum MissionStatus { offered, active, completed, failed }
+
+enum Building { barracks, trainingGround, infirmary, smithy, tavern }
+
+typedef Cost = Map<Res, int>;
+
+class ActionResult {
+  const ActionResult.ok(this.message) : ok = true;
+  const ActionResult.fail(this.message) : ok = false;
+
+  final bool ok;
+  final String message;
+}
+
+T enumByName<T extends Enum>(List<T> values, Object? name) {
+  for (final v in values) {
+    if (v.name == name) return v;
+  }
+  throw FormatException('Giá trị không hợp lệ: $name');
+}
+
+int intIn(Object? v, int min, int max, [String what = 'số']) {
+  if (v is! int || v < min || v > max) {
+    throw FormatException('$what không hợp lệ: $v');
+  }
+  return v;
+}
+
+Map<K, int> readEnumMap<K extends Enum>(
+  List<K> keys,
+  Object? raw, {
+  int max = 1 << 30,
+}) {
+  if (raw is! Map) throw const FormatException('Thiếu bảng dữ liệu');
+  final out = <K, int>{for (final k in keys) k: 0};
+  raw.forEach((key, value) {
+    out[enumByName(keys, key)] = intIn(value, 0, max);
+  });
+  return out;
+}
+
+/// Một binh sĩ là một thực thể riêng, id ổn định suốt đời (kể cả khi đã chết).
+/// id âm dành cho kẻ địch sinh ra khi chiến đấu.
+class Soldier {
+  Soldier({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.stats,
+    this.level = 1,
+    this.xp = 0,
+    this.trait = TraitId.none,
+    this.weaponId,
+    this.armorId,
+    this.accessoryId,
+    this.morale = 70,
+    this.injuryDays = 0,
+    this.status = SoldierStatus.active,
+    this.trainingStat,
+    this.trainingDays = 0,
+    this.kills = 0,
+    this.battles = 0,
+  });
+
+  final int id;
+  String name;
+  final Role role;
+  final Map<Stat, int> stats;
+  int level;
+  int xp;
+  final TraitId trait;
+  String? weaponId;
+  String? armorId;
+  String? accessoryId;
+  int morale;
+  int injuryDays;
+  SoldierStatus status;
+  Stat? trainingStat;
+  int trainingDays;
+  int kills;
+  int battles;
+
+  bool get alive => status == SoldierStatus.active;
+  bool get injured => injuryDays > 0;
+  bool get training => trainingStat != null;
+  bool get available => alive && !injured && !training;
+
+  String? equipped(Slot s) => switch (s) {
+    Slot.weapon => weaponId,
+    Slot.armor => armorId,
+    Slot.accessory => accessoryId,
+  };
+
+  void setEquipped(Slot s, String? id) {
+    switch (s) {
+      case Slot.weapon:
+        weaponId = id;
+      case Slot.armor:
+        armorId = id;
+      case Slot.accessory:
+        accessoryId = id;
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'role': role.name,
+    'stats': {for (final e in stats.entries) e.key.name: e.value},
+    'level': level,
+    'xp': xp,
+    'trait': trait.name,
+    'weapon': weaponId,
+    'armor': armorId,
+    'accessory': accessoryId,
+    'morale': morale,
+    'injuryDays': injuryDays,
+    'status': status.name,
+    'trainingStat': trainingStat?.name,
+    'trainingDays': trainingDays,
+    'kills': kills,
+    'battles': battles,
+  };
+
+  factory Soldier.fromJson(Map<String, dynamic> j) {
+    final name = j['name'];
+    if (name is! String || name.trim().isEmpty || name.length > 40) {
+      throw const FormatException('Tên binh sĩ không hợp lệ');
+    }
+    final stats = readEnumMap(Stat.values, j['stats'], max: 60);
+    if (stats.values.any((v) => v < 1)) {
+      throw const FormatException('Chỉ số phải >= 1');
+    }
+    String? item(Object? v) {
+      if (v == null) return null;
+      if (v is! String) throw const FormatException('Trang bị không hợp lệ');
+      return v;
+    }
+
+    return Soldier(
+      id: intIn(j['id'], -1000000, 1 << 30, 'id'),
+      name: name,
+      role: enumByName(Role.values, j['role']),
+      stats: stats,
+      level: intIn(j['level'], 1, 99, 'cấp'),
+      xp: intIn(j['xp'], 0, 1 << 30),
+      trait: enumByName(TraitId.values, j['trait']),
+      weaponId: item(j['weapon']),
+      armorId: item(j['armor']),
+      accessoryId: item(j['accessory']),
+      morale: intIn(j['morale'], 0, 100, 'tinh thần'),
+      injuryDays: intIn(j['injuryDays'], 0, 60),
+      status: enumByName(SoldierStatus.values, j['status']),
+      trainingStat: j['trainingStat'] == null
+          ? null
+          : enumByName(Stat.values, j['trainingStat']),
+      trainingDays: intIn(j['trainingDays'], 0, 60),
+      kills: intIn(j['kills'], 0, 1 << 30),
+      battles: intIn(j['battles'], 0, 1 << 30),
+    );
+  }
+}
+
+class Mission {
+  Mission({
+    required this.id,
+    required this.templateId,
+    this.status = MissionStatus.offered,
+    this.deadline = 0,
+    this.progress = 0,
+  });
+
+  final int id;
+  final String templateId;
+  MissionStatus status;
+  int deadline;
+  int progress;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'template': templateId,
+    'status': status.name,
+    'deadline': deadline,
+    'progress': progress,
+  };
+
+  factory Mission.fromJson(Map<String, dynamic> j) {
+    final t = j['template'];
+    if (t is! String) throw const FormatException('Nhiệm vụ thiếu mẫu');
+    return Mission(
+      id: intIn(j['id'], 0, 1 << 30),
+      templateId: t,
+      status: enumByName(MissionStatus.values, j['status']),
+      deadline: intIn(j['deadline'], 0, 1 << 30),
+      progress: intIn(j['progress'], 0, 1 << 30),
+    );
+  }
+}
+
+/// Tồn kho của một người bán, lưu trong save (trường tùy chọn của save v2).
+class ShopStock {
+  ShopStock({
+    Map<String, int>? items,
+    Map<Res, int>? resources,
+    this.lastRestock = 0,
+  }) : items = items ?? {},
+       resources = resources ?? {};
+
+  final Map<String, int> items;
+  final Map<Res, int> resources;
+  int lastRestock;
+
+  Map<String, dynamic> toJson() => {
+    'items': items,
+    'resources': {for (final e in resources.entries) e.key.name: e.value},
+    'lastRestock': lastRestock,
+  };
+
+  factory ShopStock.fromJson(Map<String, dynamic> j) {
+    final it = j['items'];
+    final rs = j['resources'];
+    if (it is! Map || rs is! Map) {
+      throw const FormatException('Tồn kho cửa hàng hỏng');
+    }
+    return ShopStock(
+      items: {
+        for (final e in it.entries)
+          e.key as String: intIn(e.value, 0, 9999, 'tồn kho'),
+      },
+      resources: {
+        for (final e in rs.entries)
+          enumByName(Res.values, e.key): intIn(e.value, 0, 9999, 'tồn kho'),
+      },
+      lastRestock: intIn(j['lastRestock'], 0, 1 << 30),
+    );
+  }
+}
+
+class GameState {
+  GameState({
+    required this.seed,
+    required this.day,
+    required this.res,
+    required this.soldiers,
+    required this.nextSoldierId,
+    required this.buildings,
+    required this.inventory,
+    required this.candidates,
+    required this.missions,
+    required this.nextMissionId,
+    required this.kingSatisfaction,
+    required this.missionsCompleted,
+    required this.discovered,
+    required this.cleared,
+    required this.explored,
+    required this.log,
+    this.rngCounter = 0,
+    this.battlesWon = 0,
+    this.battlesLost = 0,
+    this.fallenTotal = 0,
+    this.victory = false,
+    this.legacy,
+    Map<String, ShopStock>? shops,
+    this.visiting,
+    this.tradeCount = 0,
+  }) : shops = shops ?? {};
+
+  final int seed;
+  int day;
+  final Map<Res, int> res;
+  final List<Soldier> soldiers;
+  int nextSoldierId;
+  final Map<Building, int> buildings;
+  final Map<String, int> inventory;
+  final List<Soldier> candidates;
+  final List<Mission> missions;
+  int nextMissionId;
+  int kingSatisfaction;
+  int missionsCompleted;
+  final Set<String> discovered;
+  final Set<String> cleared;
+  final Set<String> explored;
+  final List<String> log;
+  int rngCounter;
+  int battlesWon;
+  int battlesLost;
+  int fallenTotal;
+  bool victory;
+
+  /// Tồn kho người bán theo id; thiếu thì được tạo từ danh mục khi truy cập lần đầu.
+  final Map<String, ShopStock> shops;
+
+  /// Thành phố đang ở (đã hành quân tới). Chỉ giao dịch được khi đang ở thành phố có người bán đó.
+  String? visiting;
+  int tradeCount;
+
+  /// Dữ liệu save v1 gốc được giữ lại nguyên vẹn khi migrate (không âm thầm xóa).
+  Map<String, dynamic>? legacy;
+
+  /// Trường tùy chọn: save v2 cũ không có `shops` vẫn đọc được (thiếu thì để trống, tạo lại khi cần).
+  static Map<String, ShopStock> _readShops(Object? raw) {
+    if (raw == null) return {};
+    if (raw is! Map) throw const FormatException('Dữ liệu cửa hàng hỏng');
+    return {
+      for (final e in raw.entries)
+        e.key as String: ShopStock.fromJson(
+          Map<String, dynamic>.from(e.value as Map),
+        ),
+    };
+  }
+
+  static const maxBuildingLevel = 3;
+  static const maxLog = 40;
+
+  bool get gameOver => kingSatisfaction <= 0 && !victory;
+  List<Soldier> get roster => [
+    for (final s in soldiers)
+      if (s.alive) s,
+  ];
+  List<Soldier> get fallen => [
+    for (final s in soldiers)
+      if (s.status == SoldierStatus.dead) s,
+  ];
+
+  Soldier? soldier(int id) {
+    for (final s in soldiers) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  int get tier => missionsCompleted >= 10
+      ? 3
+      : (missionsCompleted >= 6 ? 2 : (missionsCompleted >= 3 ? 1 : 0));
+
+  double get armyMorale {
+    final r = roster;
+    return r.isEmpty ? 0 : r.fold(0, (a, s) => a + s.morale) / r.length;
+  }
+
+  void addLog(String line) {
+    log.insert(0, 'Ngày $day: $line');
+    if (log.length > maxLog) log.removeRange(maxLog, log.length);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'seed': seed,
+    'day': day,
+    'res': {for (final e in res.entries) e.key.name: e.value},
+    'soldiers': [for (final s in soldiers) s.toJson()],
+    'nextSoldierId': nextSoldierId,
+    'buildings': {for (final e in buildings.entries) e.key.name: e.value},
+    'inventory': inventory,
+    'candidates': [for (final s in candidates) s.toJson()],
+    'missions': [for (final m in missions) m.toJson()],
+    'nextMissionId': nextMissionId,
+    'kingSatisfaction': kingSatisfaction,
+    'missionsCompleted': missionsCompleted,
+    'discovered': discovered.toList()..sort(),
+    'cleared': cleared.toList()..sort(),
+    'explored': explored.toList()..sort(),
+    'log': log,
+    'rngCounter': rngCounter,
+    'battlesWon': battlesWon,
+    'battlesLost': battlesLost,
+    'fallenTotal': fallenTotal,
+    'victory': victory,
+    'shops': {for (final e in shops.entries) e.key: e.value.toJson()},
+    'visiting': visiting,
+    'tradeCount': tradeCount,
+    if (legacy != null) 'legacy': legacy,
+  };
+
+  /// Ném [FormatException] nếu dữ liệu sai cấu trúc hoặc vô lý.
+  factory GameState.fromJson(Map<String, dynamic> j) {
+    try {
+      List<T> list<T>(Object? raw, T Function(Map<String, dynamic>) f) {
+        if (raw is! List) throw const FormatException('Thiếu danh sách');
+        return [for (final e in raw) f(Map<String, dynamic>.from(e as Map))];
+      }
+
+      Set<String> strSet(Object? raw) {
+        if (raw is! List) throw const FormatException('Thiếu tập hợp');
+        return {for (final e in raw) e as String};
+      }
+
+      final inv = j['inventory'];
+      if (inv is! Map) throw const FormatException('Thiếu kho đồ');
+      final soldiers = list(j['soldiers'], Soldier.fromJson);
+      final ids = <int>{};
+      for (final s in soldiers) {
+        if (!ids.add(s.id)) throw const FormatException('Trùng id binh sĩ');
+      }
+      final nextId = intIn(j['nextSoldierId'], 1, 1 << 30);
+      if (soldiers.any((s) => s.id >= nextId)) {
+        throw const FormatException('nextSoldierId sai');
+      }
+      final buildings = readEnumMap(
+        Building.values,
+        j['buildings'],
+        max: maxBuildingLevel,
+      );
+      return GameState(
+        seed: intIn(j['seed'], 0, 1 << 40),
+        day: intIn(j['day'], 1, 1 << 30),
+        res: readEnumMap(Res.values, j['res']),
+        soldiers: soldiers,
+        nextSoldierId: nextId,
+        buildings: buildings,
+        inventory: {
+          for (final e in inv.entries)
+            e.key as String: intIn(e.value, 0, 1 << 30),
+        },
+        candidates: list(j['candidates'], Soldier.fromJson),
+        missions: list(j['missions'], Mission.fromJson),
+        nextMissionId: intIn(j['nextMissionId'], 0, 1 << 30),
+        kingSatisfaction: intIn(j['kingSatisfaction'], 0, 100),
+        missionsCompleted: intIn(j['missionsCompleted'], 0, 1 << 20),
+        discovered: strSet(j['discovered']),
+        cleared: strSet(j['cleared']),
+        explored: strSet(j['explored']),
+        log: [for (final e in (j['log'] as List)) e as String],
+        rngCounter: intIn(j['rngCounter'], 0, 1 << 40),
+        battlesWon: intIn(j['battlesWon'], 0, 1 << 30),
+        battlesLost: intIn(j['battlesLost'], 0, 1 << 30),
+        fallenTotal: intIn(j['fallenTotal'], 0, 1 << 30),
+        victory: j['victory'] == true,
+        shops: _readShops(j['shops']),
+        visiting: j['visiting'] as String?,
+        tradeCount: j['tradeCount'] == null
+            ? 0
+            : intIn(j['tradeCount'], 0, 1 << 30),
+        legacy: j['legacy'] == null
+            ? null
+            : Map<String, dynamic>.from(j['legacy'] as Map),
+      );
+    } on FormatException {
+      rethrow;
+    } catch (e) {
+      throw FormatException('Save hỏng: $e');
+    }
+  }
+}
