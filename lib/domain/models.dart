@@ -2,7 +2,8 @@ enum Res { food, coins, wood, iron }
 
 enum Role { spearman, archer, cavalry }
 
-enum Stat { str, dex, spd, con }
+/// Ba thuộc tính huấn luyện được (VERIFIED: ảnh chụp bảng binh sĩ). Tốc độ là chỉ số dẫn xuất, không phải thuộc tính.
+enum Stat { str, dex, con }
 
 enum Slot { weapon, armor, accessory }
 
@@ -12,7 +13,17 @@ enum SoldierStatus { active, dead, deserted }
 
 enum MissionStatus { offered, active, completed, failed }
 
-enum Building { barracks, trainingGround, infirmary, smithy, tavern }
+enum Building { barracks, smithy, tavern }
+
+/// Công trình đặt trong trại, có sức chứa và gán binh sĩ bằng kéo-thả (VERIFIED: clip trại).
+/// Tên và hiệu ứng từng loại là PROPOSED, trừ lều cứu thương (VERIFIED) và bếp lửa (VERIFIED).
+enum FacilityType {
+  meleeYard,
+  archeryRange,
+  enduranceYard,
+  infirmary,
+  campfire,
+}
 
 typedef Cost = Map<Res, int>;
 
@@ -66,13 +77,12 @@ class Soldier {
     this.armorId,
     this.accessoryId,
     this.morale = 70,
-    this.injuryDays = 0,
+    this.hp = 0,
     this.status = SoldierStatus.active,
-    this.trainingStat,
-    this.trainingDays = 0,
+    Map<Stat, int>? train,
     this.kills = 0,
     this.battles = 0,
-  });
+  }) : train = train ?? {for (final st in Stat.values) st: 0};
 
   final int id;
   String name;
@@ -85,17 +95,20 @@ class Soldier {
   String? armorId;
   String? accessoryId;
   int morale;
-  int injuryDays;
+
+  /// HP hiện tại (kéo dài giữa các trận). 0 khi vừa tạo nghĩa là "đầy"; luật chuẩn hóa ngay khi tạo.
+  int hp;
   SoldierStatus status;
-  Stat? trainingStat;
-  int trainingDays;
+
+  /// Tiến độ huấn luyện từng thuộc tính, phần trăm 0..99; đạt 100 thì +1 thuộc tính.
+  final Map<Stat, int> train;
   int kills;
   int battles;
 
   bool get alive => status == SoldierStatus.active;
-  bool get injured => injuryDays > 0;
-  bool get training => trainingStat != null;
-  bool get available => alive && !injured && !training;
+
+  /// Có thể xuất quân: còn sống và còn HP.
+  bool get available => alive && hp > 0;
 
   String? equipped(Slot s) => switch (s) {
     Slot.weapon => weaponId,
@@ -126,10 +139,9 @@ class Soldier {
     'armor': armorId,
     'accessory': accessoryId,
     'morale': morale,
-    'injuryDays': injuryDays,
+    'hp': hp,
     'status': status.name,
-    'trainingStat': trainingStat?.name,
-    'trainingDays': trainingDays,
+    'train': {for (final e in train.entries) e.key.name: e.value},
     'kills': kills,
     'battles': battles,
   };
@@ -161,14 +173,58 @@ class Soldier {
       armorId: item(j['armor']),
       accessoryId: item(j['accessory']),
       morale: intIn(j['morale'], 0, 100, 'tinh thần'),
-      injuryDays: intIn(j['injuryDays'], 0, 60),
+      hp: intIn(j['hp'], 0, 100000, 'HP'),
       status: enumByName(SoldierStatus.values, j['status']),
-      trainingStat: j['trainingStat'] == null
-          ? null
-          : enumByName(Stat.values, j['trainingStat']),
-      trainingDays: intIn(j['trainingDays'], 0, 60),
+      train: readEnumMap(Stat.values, j['train'], max: 99),
       kills: intIn(j['kills'], 0, 1 << 30),
       battles: intIn(j['battles'], 0, 1 << 30),
+    );
+  }
+}
+
+class Facility {
+  Facility({
+    required this.id,
+    required this.type,
+    required this.x,
+    required this.y,
+    List<int>? assigned,
+  }) : assigned = assigned ?? [];
+
+  final int id;
+  final FacilityType type;
+
+  /// Vị trí trong cảnh trại, tỷ lệ 0..1.
+  final double x, y;
+
+  /// Id binh sĩ đang được gán (tối đa [capacity]).
+  final List<int> assigned;
+
+  static const capacity = 3;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': type.name,
+    'x': x,
+    'y': y,
+    'assigned': assigned,
+  };
+
+  factory Facility.fromJson(Map<String, dynamic> j) {
+    final x = j['x'], y = j['y'];
+    if (x is! num || y is! num || x < 0 || x > 1 || y < 0 || y > 1) {
+      throw const FormatException('Vị trí công trình không hợp lệ');
+    }
+    final a = j['assigned'];
+    if (a is! List || a.length > capacity) {
+      throw const FormatException('Danh sách gán công trình không hợp lệ');
+    }
+    return Facility(
+      id: intIn(j['id'], 1, 1 << 30, 'id công trình'),
+      type: enumByName(FacilityType.values, j['type']),
+      x: x.toDouble(),
+      y: y.toDouble(),
+      assigned: [for (final e in a) intIn(e, 1, 1 << 30, 'id binh sĩ')],
     );
   }
 }
@@ -256,6 +312,8 @@ class GameState {
     required this.soldiers,
     required this.nextSoldierId,
     required this.buildings,
+    required this.facilities,
+    required this.nextFacilityId,
     required this.inventory,
     required this.candidates,
     required this.missions,
@@ -283,6 +341,8 @@ class GameState {
   final List<Soldier> soldiers;
   int nextSoldierId;
   final Map<Building, int> buildings;
+  final List<Facility> facilities;
+  int nextFacilityId;
   final Map<String, int> inventory;
   final List<Soldier> candidates;
   final List<Mission> missions;
@@ -362,6 +422,8 @@ class GameState {
     'soldiers': [for (final s in soldiers) s.toJson()],
     'nextSoldierId': nextSoldierId,
     'buildings': {for (final e in buildings.entries) e.key.name: e.value},
+    'facilities': [for (final f in facilities) f.toJson()],
+    'nextFacilityId': nextFacilityId,
     'inventory': inventory,
     'candidates': [for (final s in candidates) s.toJson()],
     'missions': [for (final m in missions) m.toJson()],
@@ -412,6 +474,20 @@ class GameState {
         j['buildings'],
         max: maxBuildingLevel,
       );
+      final facilities = list(j['facilities'], Facility.fromJson);
+      final nextFacility = intIn(j['nextFacilityId'], 1, 1 << 30);
+      final fids = <int>{};
+      final assignedSeen = <int>{};
+      for (final f in facilities) {
+        if (!fids.add(f.id) || f.id >= nextFacility) {
+          throw const FormatException('Id công trình sai');
+        }
+        for (final sid in f.assigned) {
+          if (!ids.contains(sid) || !assignedSeen.add(sid)) {
+            throw const FormatException('Gán công trình sai');
+          }
+        }
+      }
       return GameState(
         seed: intIn(j['seed'], 0, 1 << 40),
         day: intIn(j['day'], 1, 1 << 30),
@@ -419,6 +495,8 @@ class GameState {
         soldiers: soldiers,
         nextSoldierId: nextId,
         buildings: buildings,
+        facilities: facilities,
+        nextFacilityId: nextFacility,
         inventory: {
           for (final e in inv.entries)
             e.key as String: intIn(e.value, 0, 1 << 30),

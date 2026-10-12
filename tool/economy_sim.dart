@@ -101,23 +101,76 @@ bool hire(Run r, {int reserve = 0, int upTo = 99}) {
   return did;
 }
 
+/// Gán binh sĩ rảnh vào công trình huấn luyện đúng thuộc tính thấp nhất (kéo-thả ở game thật).
 bool train(Run r, {int reserve = 0}) {
   final s = r.s;
   var did = false;
   for (final so in ready(s).reversed) {
-    if (s.res[Res.coins]! - 10 < reserve) break;
+    if (GameRules.facilityOf(s, so.id) != null) continue;
     final stats =
         Stat.values
             .where((st) => so.stats[st]! < GameRules.statCap(so))
             .toList()
           ..sort((a, b) => so.stats[a]!.compareTo(so.stats[b]!));
-    if (stats.isEmpty) continue;
-    if (GameRules.startTraining(s, so.id, stats.first).ok) {
-      r.trained++;
+    for (final st in stats) {
+      final f = s.facilities
+          .where(
+            (f) =>
+                facilityDefs[f.type]!.trains == st &&
+                f.assigned.length < Facility.capacity,
+          )
+          .firstOrNull;
+      if (f != null && GameRules.assignToFacility(s, so.id, f.id).ok) {
+        r.trained++;
+        did = true;
+        break;
+      }
+    }
+  }
+  return did;
+}
+
+/// Đưa binh sĩ bị thương (HP < 60%) vào lều cứu thương nếu còn chỗ, rút người đã lành.
+bool heal(Run r) {
+  final s = r.s;
+  var did = false;
+  for (final f in s.facilities.where((f) => f.type == FacilityType.infirmary)) {
+    for (final id in List<int>.of(f.assigned)) {
+      final so = s.soldier(id);
+      if (so != null && !so.wounded) {
+        GameRules.unassign(s, id);
+        did = true;
+      }
+    }
+  }
+  for (final so in s.roster.where((x) => x.hpFraction < 0.6)) {
+    final f = s.facilities
+        .where(
+          (f) =>
+              f.type == FacilityType.infirmary &&
+              f.assigned.length < Facility.capacity,
+        )
+        .firstOrNull;
+    if (f != null &&
+        GameRules.facilityOf(s, so.id)?.type != FacilityType.infirmary &&
+        GameRules.assignToFacility(s, so.id, f.id).ok) {
       did = true;
     }
   }
   return did;
+}
+
+bool buildSome(Run r, FacilityType type, {int reserveCoins = 0}) {
+  final s = r.s;
+  final free = GameRules.freeSlotIndices(s);
+  if (free.isEmpty || s.facilities.where((f) => f.type == type).length >= 2) {
+    return false;
+  }
+  final def = facilityDefs[type]!;
+  if (s.res[Res.coins]! - (def.cost[Res.coins] ?? 0) < reserveCoins) {
+    return false;
+  }
+  return GameRules.buildFacility(s, type, free.first).ok;
 }
 
 ItemDef? bestShopItem(GameState s, Soldier so, Slot slot, int budget) {
@@ -187,7 +240,7 @@ bool upgrade(Run r, List<Building> order, {int reserveCoins = 0}) {
 
 bool finishMissions(Run r) {
   final s = r.s;
-  var did = false;
+  var did = heal(r);
   for (final m in GameRules.byStatus(s, MissionStatus.active)) {
     if (GameRules.missionReady(s, m) && GameRules.completeMission(s, m.id).ok) {
       did = true;
@@ -528,7 +581,8 @@ final policies = <String, Policy>{
     finishMissions(r);
     train(r, reserve: 10);
     hire(r, reserve: 40, upTo: 8);
-    upgrade(r, [Building.trainingGround, Building.tavern], reserveCoins: 40);
+    upgrade(r, [Building.tavern], reserveCoins: 40);
+    buildSome(r, FacilityType.enduranceYard, reserveCoins: 40);
     acceptMissions(r, max: 2, easyOnly: true);
     if (!pursueMission(r)) {
       opportunisticCamp(r);
@@ -546,25 +600,13 @@ final policies = <String, Policy>{
   },
   '04 Ưu tiên xây dựng': (r) {
     finishMissions(r);
-    upgrade(r, [
-      Building.barracks,
-      Building.smithy,
-      Building.trainingGround,
-      Building.infirmary,
-      Building.tavern,
-    ]);
+    upgrade(r, [Building.barracks, Building.smithy, Building.tavern]);
     hire(r, reserve: 50, upTo: 8);
     acceptMissions(r, max: 2, easyOnly: true);
     if (!pursueMission(r)) {
       opportunisticCamp(r);
     }
-    ensureMaterials(r, [
-      Building.barracks,
-      Building.smithy,
-      Building.trainingGround,
-      Building.infirmary,
-      Building.tavern,
-    ]);
+    ensureMaterials(r, [Building.barracks, Building.smithy, Building.tavern]);
   },
   '05 Ưu tiên nhiệm vụ': (r) {
     finishMissions(r);
@@ -612,12 +654,12 @@ final policies = <String, Policy>{
     hire(r, reserve: 0, upTo: 8);
     equip(r, reserve: 0);
     train(r, reserve: 0);
-    upgrade(r, [Building.smithy, Building.trainingGround], reserveCoins: 0);
+    upgrade(r, [Building.smithy], reserveCoins: 0);
     acceptMissions(r, max: 3, easyOnly: true);
     if (!pursueMission(r)) {
       if (!opportunisticCamp(r)) {
         if (r.s.res[Res.coins]! >= 160 && cityTrip(r)) return;
-        ensureMaterials(r, [Building.smithy, Building.trainingGround]);
+        ensureMaterials(r, [Building.smithy]);
       }
     }
   },
@@ -668,20 +710,12 @@ void balanced(Run r) {
   upgrade(r, [
     Building.barracks,
     Building.smithy,
-    Building.infirmary,
-    Building.trainingGround,
     Building.tavern,
   ], reserveCoins: 60);
   if (!pursueMission(r)) {
     if (!opportunisticCamp(r)) {
       if (r.s.res[Res.coins]! >= 160 && cityTrip(r)) return;
-      ensureMaterials(r, [
-        Building.barracks,
-        Building.smithy,
-        Building.infirmary,
-        Building.trainingGround,
-        Building.tavern,
-      ]);
+      ensureMaterials(r, [Building.barracks, Building.smithy, Building.tavern]);
     }
   }
 }

@@ -1,0 +1,421 @@
+{
+ "seed": 42,
+ "day": 4,
+ "res": {
+  "food": 403,
+  "coins": 171,
+  "wood": 420,
+  "iron": 400
+ },
+ "soldiers": [
+  {
+   "id": 1,
+   "name": "Wystan",
+   "role": "spearman",
+   "stats": {
+    "str": 6,
+    "dex": 6,
+    "spd": 4,
+    "con": 9
+   },
+   "level": 2,
+   "xp": 7,
+   "trait": "none",
+   "weapon": "wooden_spear",
+   "armor": "leather_armor",
+   "accessory": null,
+   "morale": 57,
+   "injuryDays": 2,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 1
+  },
+  {
+   "id": 2,
+   "name": "Cora",
+   "role": "spearman",
+   "stats": {
+    "str": 6,
+    "dex": 6,
+    "spd": 5,
+    "con": 7
+   },
+   "level": 1,
+   "xp": 15,
+   "trait": "none",
+   "weapon": "wooden_spear",
+   "armor": "padded_armor",
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 3,
+   "name": "Varyn",
+   "role": "spearman",
+   "stats": {
+    "str": 7,
+    "dex": 4,
+    "spd": 5,
+    "con": 6
+   },
+   "level": 1,
+   "xp": 15,
+   "trait": "quickLearner",
+   "weapon": "wooden_spear",
+   "armor": "padded_armor",
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 4,
+   "name": "Aldis L\u1eeda",
+   "role": "archer",
+   "stats": {
+    "str": 5,
+    "dex": 10,
+    "spd": 5,
+    "con": 6
+   },
+   "level": 2,
+   "xp": 17,
+   "trait": "tough",
+   "weapon": "hunting_bow",
+   "armor": "padded_armor",
+   "accessory": null,
+   "morale": 76,
+   "injuryDays": 0,
+   "status": "dead",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 2,
+   "battles": 1
+  },
+  {
+   "id": 5,
+   "name": "Kael",
+   "role": "archer",
+   "stats": {
+    "str": 3,
+    "dex": 8,
+    "spd": 5,
+    "con": 4
+   },
+   "level": 2,
+   "xp": 12,
+   "trait": "nimble",
+   "weapon": "hunting_bow",
+   "armor": "padded_armor",
+   "accessory": null,
+   "morale": 76,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": "con",
+   "trainingDays": 2,
+   "kills": 1,
+   "battles": 1
+  },
+  {
+   "id": 6,
+   "name": "Jessa",
+   "role": "cavalry",
+   "stats": {
+    "str": 8,
+    "dex": 4,
+    "spd": 9,
+    "con": 6
+   },
+   "level": 2,
+   "xp": 7,
+   "trait": "bornLeader",
+   "weapon": "short_sword",
+   "armor": "padded_armor",
+   "accessory": null,
+   "morale": 76,
+   "injuryDays": 5,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 1
+  },
+  {
+   "id": 7,
+   "name": "Kira",
+   "role": "archer",
+   "stats": {
+    "str": 5,
+    "dex": 10,
+    "spd": 7,
+    "con": 6
+   },
+   "level": 2,
+   "xp": 12,
+   "trait": "tough",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 76,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 1,
+   "battles": 1
+  },
+  {
+   "id": 8,
+   "name": "Dara Gai",
+   "role": "archer",
+   "stats": {
+    "str": 4,
+    "dex": 8,
+    "spd": 7,
+    "con": 6
+   },
+   "level": 2,
+   "xp": 7,
+   "trait": "tough",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 76,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 1
+  },
+  {
+   "id": 9,
+   "name": "Jessa",
+   "role": "archer",
+   "stats": {
+    "str": 3,
+    "dex": 9,
+    "spd": 7,
+    "con": 5
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "tough",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 2,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  }
+ ],
+ "nextSoldierId": 17,
+ "buildings": {
+  "barracks": 2,
+  "trainingGround": 3,
+  "infirmary": 2,
+  "smithy": 1,
+  "tavern": 0
+ },
+ "inventory": {
+  "padded_armor": 2,
+  "iron_ring": 1,
+  "lucky_charm": 1,
+  "leather_armor": 1
+ },
+ "candidates": [
+  {
+   "id": 12,
+   "name": "Ulric",
+   "role": "cavalry",
+   "stats": {
+    "str": 8,
+    "dex": 4,
+    "spd": 8,
+    "con": 5
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "quickLearner",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 13,
+   "name": "Nolan",
+   "role": "archer",
+   "stats": {
+    "str": 4,
+    "dex": 9,
+    "spd": 5,
+    "con": 5
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "none",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 14,
+   "name": "Hale",
+   "role": "cavalry",
+   "stats": {
+    "str": 7,
+    "dex": 5,
+    "spd": 8,
+    "con": 5
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "none",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 15,
+   "name": "Osric Gai",
+   "role": "spearman",
+   "stats": {
+    "str": 7,
+    "dex": 6,
+    "spd": 5,
+    "con": 8
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "none",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  },
+  {
+   "id": 16,
+   "name": "Brynn",
+   "role": "cavalry",
+   "stats": {
+    "str": 8,
+    "dex": 4,
+    "spd": 8,
+    "con": 6
+   },
+   "level": 1,
+   "xp": 0,
+   "trait": "tough",
+   "weapon": null,
+   "armor": null,
+   "accessory": null,
+   "morale": 70,
+   "injuryDays": 0,
+   "status": "active",
+   "trainingStat": null,
+   "trainingDays": 0,
+   "kills": 0,
+   "battles": 0
+  }
+ ],
+ "missions": [
+  {
+   "id": 1,
+   "template": "clear_bandits",
+   "status": "offered",
+   "deadline": 0,
+   "progress": 0
+  },
+  {
+   "id": 2,
+   "template": "deliver_food_a",
+   "status": "offered",
+   "deadline": 0,
+   "progress": 0
+  },
+  {
+   "id": 3,
+   "template": "deliver_wood_a",
+   "status": "offered",
+   "deadline": 0,
+   "progress": 0
+  }
+ ],
+ "nextMissionId": 4,
+ "kingSatisfaction": 50,
+ "missionsCompleted": 0,
+ "discovered": [
+  "a_city",
+  "a_outpost",
+  "a_quarry",
+  "g_bandits",
+  "g_farm",
+  "g_town",
+  "g_woods",
+  "m_camp",
+  "m_port",
+  "m_reeds"
+ ],
+ "cleared": [
+  "g_bandits"
+ ],
+ "explored": [],
+ "log": [
+  "Ng\u00e0y 3: Vi\u1ec5n chinh Tr\u1ea1i c\u01b0\u1edbp \u0111\u01b0\u1eddng: Chi\u1ebfn th\u1eafng! Tr\u1ea1i c\u01b0\u1edbp \u0111\u01b0\u1eddng \u0111\u00e3 b\u1ecb qu\u00e9t s\u1ea1ch.",
+  "Ng\u00e0y 1: Tuy\u1ec3n Jessa (Cung th\u1ee7).",
+  "Ng\u00e0y 1: Tuy\u1ec3n Dara Gai (Cung th\u1ee7).",
+  "Ng\u00e0y 1: Tuy\u1ec3n Kira (Cung th\u1ee7).",
+  "Ng\u00e0y 1: B\u1ea1n nh\u1eadn quy\u1ec1n ch\u1ec9 huy m\u1ed9t tr\u1ea1i l\u00ednh nh\u1ecf."
+ ],
+ "rngCounter": 35,
+ "battlesWon": 1,
+ "battlesLost": 0,
+ "fallenTotal": 1,
+ "victory": false,
+ "shops": {},
+ "visiting": "g_town",
+ "tradeCount": 0
+}

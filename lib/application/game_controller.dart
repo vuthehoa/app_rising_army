@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../data/save_repository.dart';
+import '../domain/battle.dart';
 import '../domain/models.dart';
 import '../domain/rules.dart';
 
@@ -53,10 +54,12 @@ class GameController extends ChangeNotifier {
   ActionResult hire(int id) => _apply(() => GameRules.hire(_state!, id));
   ActionResult rename(int id, String n) =>
       _apply(() => GameRules.rename(_state!, id, n));
-  ActionResult startTraining(int id, Stat st) =>
-      _apply(() => GameRules.startTraining(_state!, id, st));
-  ActionResult cancelTraining(int id) =>
-      _apply(() => GameRules.cancelTraining(_state!, id));
+  ActionResult assignToFacility(int soldier, int facility) =>
+      _apply(() => GameRules.assignToFacility(_state!, soldier, facility));
+  ActionResult unassign(int soldier) =>
+      _apply(() => GameRules.unassign(_state!, soldier));
+  ActionResult buildFacility(FacilityType type, int slot) =>
+      _apply(() => GameRules.buildFacility(_state!, type, slot));
   ActionResult equip(int id, String item) =>
       _apply(() => GameRules.equip(_state!, id, item));
   ActionResult unequip(int id, Slot slot) =>
@@ -90,8 +93,19 @@ class GameController extends ChangeNotifier {
     return r;
   }
 
-  ExpeditionResult sendExpedition(String loc, List<int> squad, Set<int> front) {
-    final r = GameRules.sendExpedition(_state!, loc, squad, front);
+  ExpeditionResult sendExpedition(
+    String loc,
+    List<int> squad,
+    Set<int> front, {
+    Map<int, Pos>? placement,
+  }) {
+    final r = GameRules.sendExpedition(
+      _state!,
+      loc,
+      squad,
+      front,
+      placement: placement,
+    );
     if (r.result.ok) {
       lastExpedition = r;
       _afterChange();

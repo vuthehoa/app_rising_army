@@ -5,7 +5,7 @@ import 'catalog.dart';
 import 'models.dart';
 import 'stats.dart';
 
-enum CasualtyKind { survived, injured, retreated, dead }
+enum CasualtyKind { survived, wounded, dead }
 
 class Casualty {
   Casualty(this.id, this.name, this.kind, {this.xp = 0, this.levelUps = 0});
@@ -57,9 +57,9 @@ class GameRules {
   // ---------- Tạo ván mới & sinh binh sĩ ----------
 
   static const _base = <Role, Map<Stat, int>>{
-    Role.spearman: {Stat.str: 6, Stat.dex: 4, Stat.spd: 4, Stat.con: 6},
-    Role.archer: {Stat.str: 3, Stat.dex: 7, Stat.spd: 5, Stat.con: 4},
-    Role.cavalry: {Stat.str: 6, Stat.dex: 4, Stat.spd: 7, Stat.con: 5},
+    Role.spearman: {Stat.str: 6, Stat.dex: 5, Stat.con: 6},
+    Role.archer: {Stat.str: 3, Stat.dex: 8, Stat.con: 4},
+    Role.cavalry: {Stat.str: 6, Stat.dex: 6, Stat.con: 5},
   };
 
   static String _name(Random r) {
@@ -96,6 +96,7 @@ class GameRules {
       sol.weaponId = starterWeapon[rl];
       sol.armorId = 'padded_armor';
     }
+    sol.hp = deriveStats(sol).maxHp;
     return sol;
   }
 
@@ -109,9 +110,15 @@ class GameRules {
       buildings: {
         for (final b in Building.values) b: 0,
         Building.barracks: 1,
-        Building.trainingGround: 1,
         Building.smithy: 1,
       },
+      facilities: [
+        Facility(id: 1, type: FacilityType.meleeYard, x: 0.27, y: 0.4),
+        Facility(id: 2, type: FacilityType.archeryRange, x: 0.5, y: 0.3),
+        Facility(id: 3, type: FacilityType.infirmary, x: 0.76, y: 0.4),
+        Facility(id: 4, type: FacilityType.campfire, x: 0.5, y: 0.64),
+      ],
+      nextFacilityId: 5,
       inventory: {'padded_armor': 1, 'iron_ring': 1, 'lucky_charm': 1},
       candidates: [],
       missions: [],
@@ -181,6 +188,9 @@ class GameRules {
       .map((e) => '${resNames[e.key]} (thiếu ${e.value - s.res[e.key]!})')
       .join(', ');
 
+  /// HP tối đa hiện tại của binh sĩ.
+  static int fullHp(Soldier so) => deriveStats(so).maxHp;
+
   static ActionResult? _blocked(GameState s) => (s.gameOver || s.victory)
       ? const ActionResult.fail('Ván chơi đã kết thúc.')
       : null;
@@ -190,14 +200,6 @@ class GameRules {
   static int level(GameState s, Building b) => s.buildings[b]!;
 
   static int rosterCap(GameState s) => 6 + 4 * level(s, Building.barracks);
-
-  static int trainingSlots(GameState s) =>
-      level(s, Building.trainingGround) == 0
-      ? 0
-      : 1 + level(s, Building.trainingGround);
-
-  static int trainingDays(GameState s) =>
-      const [3, 3, 2, 1][level(s, Building.trainingGround)];
 
   static int statCap(Soldier s) => 10 + 2 * s.level;
 
@@ -272,47 +274,125 @@ class GameRules {
     return ActionResult.ok('Đã đổi tên thành $n.');
   }
 
-  // ---------- Huấn luyện ----------
+  // ---------- Công trình trong trại: gán bằng kéo-thả, huấn luyện, chữa trị ----------
 
-  static const trainCost = {Res.coins: 10};
+  static Facility? facilityById(GameState s, int id) {
+    for (final f in s.facilities) {
+      if (f.id == id) return f;
+    }
+    return null;
+  }
 
-  static ActionResult startTraining(GameState s, int id, Stat stat) {
+  static Facility? facilityOf(GameState s, int soldierId) {
+    for (final f in s.facilities) {
+      if (f.assigned.contains(soldierId)) return f;
+    }
+    return null;
+  }
+
+  static bool takesAssignment(FacilityType t) => t != FacilityType.campfire;
+
+  /// Gán binh sĩ vào công trình (kéo-thả). Tự rút khỏi công trình cũ. Thông báo "Unit added" ở game gốc.
+  static ActionResult assignToFacility(
+    GameState s,
+    int soldierId,
+    int facilityId,
+  ) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
-    final so = s.soldier(id);
+    final so = s.soldier(soldierId);
+    final f = facilityById(s, facilityId);
     if (so == null || !so.alive) {
       return const ActionResult.fail('Không tìm thấy binh sĩ.');
     }
-    if (so.injured) return const ActionResult.fail('Binh sĩ đang bị thương.');
-    if (so.training) return const ActionResult.fail('Đang huấn luyện.');
-    if (trainingSlots(s) == 0) return const ActionResult.fail('Cần Bãi tập.');
-    if (s.roster.where((x) => x.training).length >= trainingSlots(s)) {
-      return const ActionResult.fail('Bãi tập đã hết chỗ.');
+    if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
+    if (!takesAssignment(f.type)) {
+      return ActionResult.fail('${facilityDefs[f.type]!.name} không nhận gán.');
     }
-    if (so.stats[stat]! >= statCap(so)) {
+    if (f.assigned.contains(soldierId)) {
+      return const ActionResult.fail('Binh sĩ đã ở công trình này.');
+    }
+    if (f.assigned.length >= Facility.capacity) {
       return ActionResult.fail(
-        '${statNames[stat]} đã đạt giới hạn cấp này (${statCap(so)}).',
+        '${facilityDefs[f.type]!.name} đã đầy (${Facility.capacity}/${Facility.capacity}).',
       );
     }
-    if (!canAfford(s, trainCost)) {
-      return ActionResult.fail('Không đủ: ${_missing(s, trainCost)}.');
+    final st = facilityDefs[f.type]!.trains;
+    if (st != null && so.stats[st]! >= statCap(so)) {
+      return ActionResult.fail(
+        '${statNames[st]} đã đạt giới hạn cấp này (${statCap(so)}).',
+      );
     }
-    spend(s, trainCost);
-    so.trainingStat = stat;
-    so.trainingDays = trainingDays(s);
-    return ActionResult.ok(
-      '${so.name} bắt đầu tập ${statNames[stat]} (${so.trainingDays} ngày).',
-    );
+    for (final other in s.facilities) {
+      other.assigned.remove(soldierId);
+    }
+    f.assigned.add(soldierId);
+    return ActionResult.ok('${so.name} vào ${facilityDefs[f.type]!.name}.');
   }
 
-  static ActionResult cancelTraining(GameState s, int id) {
-    final so = s.soldier(id);
-    if (so == null || !so.training) {
-      return const ActionResult.fail('Không có buổi tập nào.');
+  static ActionResult unassign(GameState s, int soldierId) {
+    final so = s.soldier(soldierId);
+    if (so == null) return const ActionResult.fail('Không tìm thấy binh sĩ.');
+    var found = false;
+    for (final f in s.facilities) {
+      found |= f.assigned.remove(soldierId);
     }
-    so.trainingStat = null;
-    so.trainingDays = 0;
-    return const ActionResult.ok('Đã hủy buổi tập (không hoàn phí).');
+    return found
+        ? ActionResult.ok('${so.name} rời công trình.')
+        : const ActionResult.fail('Binh sĩ không ở công trình nào.');
+  }
+
+  /// Vị trí đặt công trình mới: các ô cố định trong cảnh trại (tỷ lệ 0..1), tránh chồng lên cái đã có.
+  static const facilitySlots = <(double, double)>[
+    (0.27, 0.4),
+    (0.5, 0.3),
+    (0.76, 0.4),
+    (0.5, 0.64),
+    (0.14, 0.7),
+    (0.86, 0.7),
+    (0.3, 0.8),
+    (0.7, 0.8),
+    (0.15, 0.34),
+    (0.85, 0.34),
+  ];
+
+  static List<int> freeSlotIndices(GameState s) => [
+    for (var i = 0; i < facilitySlots.length; i++)
+      if (!s.facilities.any(
+        (f) =>
+            (f.x - facilitySlots[i].$1).abs() < 0.06 &&
+            (f.y - facilitySlots[i].$2).abs() < 0.06,
+      ))
+        i,
+  ];
+
+  static ActionResult buildFacility(
+    GameState s,
+    FacilityType type,
+    int slotIndex,
+  ) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    if (!buildableFacilities.contains(type)) {
+      return const ActionResult.fail('Không thể xây công trình này.');
+    }
+    if (s.facilities.length >= maxFacilities) {
+      return const ActionResult.fail('Trại đã đạt số công trình tối đa.');
+    }
+    if (!freeSlotIndices(s).contains(slotIndex)) {
+      return const ActionResult.fail('Vị trí này đã có công trình.');
+    }
+    final def = facilityDefs[type]!;
+    if (!canAfford(s, def.cost)) {
+      return ActionResult.fail('Không đủ: ${_missing(s, def.cost)}.');
+    }
+    spend(s, def.cost);
+    final pos = facilitySlots[slotIndex];
+    s.facilities.add(
+      Facility(id: s.nextFacilityId++, type: type, x: pos.$1, y: pos.$2),
+    );
+    s.addLog('Xây ${def.name}.');
+    return ActionResult.ok('Đã xây ${def.name}.');
   }
 
   /// Trả về số cấp tăng.
@@ -328,8 +408,8 @@ class GameRules {
       ups++;
       final main = switch (so.role) {
         Role.spearman => [Stat.con, Stat.str],
-        Role.archer => [Stat.dex, Stat.spd],
-        Role.cavalry => [Stat.spd, Stat.str],
+        Role.archer => [Stat.dex, Stat.str],
+        Role.cavalry => [Stat.str, Stat.dex],
       };
       final st = main[so.level % 2];
       so.stats[st] = so.stats[st]! + 1;
@@ -356,6 +436,7 @@ class GameRules {
     s.inventory[itemId] = s.inventory[itemId]! - 1;
     if (old != null) s.inventory[old] = (s.inventory[old] ?? 0) + 1;
     so.setEquipped(item.slot, itemId);
+    so.hp = min(so.hp, so.maxHp);
     return ActionResult.ok('${so.name} trang bị ${item.name}.');
   }
 
@@ -367,6 +448,7 @@ class GameRules {
     final old = so.equipped(slot);
     if (old == null) return const ActionResult.fail('Ô trống.');
     so.setEquipped(slot, null);
+    so.hp = min(so.hp, so.maxHp);
     s.inventory[old] = (s.inventory[old] ?? 0) + 1;
     return ActionResult.ok('Đã tháo ${itemDefs[old]!.name}.');
   }
@@ -851,28 +933,47 @@ class GameRules {
     for (final so in s.roster) {
       if (so.morale <= 15 && rng(s).nextDouble() < 0.25) {
         so.status = SoldierStatus.deserted;
+        for (final f in s.facilities) {
+          f.assigned.remove(so.id);
+        }
         lines.add('${so.name} bỏ trốn vì kiệt quệ tinh thần.');
         s.addLog('${so.name} đã đào ngũ.');
       }
     }
 
-    final heal = 1 + level(s, Building.infirmary);
+    // Công trình tác động binh sĩ được gán (cấu trúc VERIFIED; tốc độ hồi/huấn luyện PROPOSED) và nghỉ ngơi.
     for (final so in s.roster) {
-      if (so.injured) {
-        so.injuryDays = max(0, so.injuryDays - heal);
-        if (!so.injured) lines.add('${so.name} đã hồi phục.');
+      final f = facilityOf(s, so.id);
+      final maxHp = so.maxHp;
+      if (so.hp > maxHp) so.hp = maxHp;
+      if (so.hp < maxHp) {
+        final frac = f?.type == FacilityType.infirmary
+            ? infirmaryHealFraction
+            : restHealFraction;
+        so.hp = min(maxHp, so.hp + max(1, (maxHp * frac).round()));
+        if (so.hp >= maxHp) lines.add('${so.name} đã hồi phục hoàn toàn.');
       }
-      if (so.training) {
-        so.trainingDays--;
-        if (so.trainingDays <= 0) {
-          final st = so.trainingStat!;
-          so.stats[st] = so.stats[st]! + 1;
-          so.trainingStat = null;
-          so.trainingDays = 0;
-          final ups = addXp(so, trainingXp);
+      final st = f == null ? null : facilityDefs[f.type]!.trains;
+      if (f != null && st != null) {
+        if (so.stats[st]! >= statCap(so)) {
+          f.assigned.remove(so.id);
           lines.add(
-            '${so.name} tăng ${statNames[st]} lên ${so.stats[st]}${ups > 0 ? ' và lên cấp ${so.level}' : ''}.',
+            '${so.name} đã đạt giới hạn ${statNames[st]} ở cấp này và rời ${facilityDefs[f.type]!.name}.',
           );
+        } else {
+          final rate =
+              (trainPercentPerDay *
+                      (so.trait == TraitId.quickLearner ? 1.3 : 1.0))
+                  .round();
+          so.train[st] = so.train[st]! + rate;
+          while (so.train[st]! >= 100) {
+            so.train[st] = so.train[st]! - 100;
+            so.stats[st] = so.stats[st]! + 1;
+            final ups = addXp(so, trainingXp);
+            lines.add(
+              '${so.name} tăng ${statNames[st]} lên ${so.stats[st]}${ups > 0 ? ' và lên cấp ${so.level}' : ''}.',
+            );
+          }
         }
       }
     }
@@ -980,7 +1081,7 @@ class GameRules {
       weapon = starterWeapon[spec.role]!;
       armor = 'padded_armor';
     }
-    return Soldier(
+    final e = Soldier(
       id: -(index + 1),
       name: '${roleNames[spec.role]} địch',
       role: spec.role,
@@ -990,6 +1091,8 @@ class GameRules {
       armorId: armor,
       morale: 60,
     );
+    e.hp = deriveStats(e).maxHp;
+    return e;
   }
 
   /// Xem trước lực lượng địch mà không đụng vào state (không tiêu hao bộ đếm ngẫu nhiên).
@@ -1014,24 +1117,30 @@ class GameRules {
     return out;
   }
 
+  /// Chạy một trận thời gian thực. [placement] là vị trí triển khai của quân ta (kéo-thả);
+  /// thiếu thì dùng [defaultPlacement] theo [frontIds].
   static BattleReport fight(
     GameState s,
     List<Soldier> squad,
     Set<int> frontIds,
-    List<Soldier> enemies,
-  ) {
+    List<Soldier> enemies, {
+    Map<int, Pos>? placement,
+  }) {
+    final place = placement ?? defaultPlacement(squad, frontIds);
+    final epos = enemyPlacement(enemies);
     final players = [
       for (final so in squad)
-        unitFrom(so, player: true, front: frontIds.contains(so.id)),
+        unitFrom(so, player: true, at: place[so.id] ?? const Pos(10, 12)),
     ];
     final foes = [
       for (final e in enemies)
-        unitFrom(e, player: false, front: e.role != Role.archer),
+        unitFrom(e, player: false, at: epos[e.id] ?? const Pos(28, 12)),
     ];
     return simulateBattle(players, foes, rng(s).nextInt(1 << 30));
   }
 
-  /// Áp kết quả trận lên binh sĩ: tử trận vĩnh viễn, thương tích, rút lui, kinh nghiệm, tinh thần.
+  /// Áp kết quả trận: HP còn lại kéo dài; HP về 0 là tử trận vĩnh viễn (không có xác suất);
+  /// kinh nghiệm và tinh thần cho người sống sót.
   static List<Casualty> applyBattle(
     GameState s,
     List<Soldier> squad,
@@ -1039,40 +1148,30 @@ class GameRules {
   ) {
     final won = rep.winner == Winner.player;
     final out = <Casualty>[];
-    final deathChance = (0.8 - 0.12 * level(s, Building.infirmary)).clamp(
-      0.4,
-      0.8,
-    );
     var deaths = 0;
     for (final so in squad) {
       final o = rep.outcomes[so.id]!;
       so.battles++;
       so.kills += o.kills;
       var kind = CasualtyKind.survived;
-      if (o.down) {
-        if (rng(s).nextDouble() < deathChance) {
-          so.status = SoldierStatus.dead;
-          so.trainingStat = null;
-          kind = CasualtyKind.dead;
-          deaths++;
-          s.fallenTotal++;
-          s.addLog('${so.name} tử trận.');
-        } else {
-          so.injuryDays = 3 + rng(s).nextInt(4);
-          kind = CasualtyKind.injured;
-        }
-      } else if (o.fled) {
-        kind = CasualtyKind.retreated;
-        so.morale = max(0, so.morale - 12);
-      } else if (o.finalHp < o.maxHp * 0.35) {
-        so.injuryDays = 1 + rng(s).nextInt(3);
-        kind = CasualtyKind.injured;
+      for (final f in s.facilities) {
+        f.assigned.remove(so.id);
+      }
+      if (o.dead) {
+        so.status = SoldierStatus.dead;
+        so.hp = 0;
+        kind = CasualtyKind.dead;
+        deaths++;
+        s.fallenTotal++;
+        s.addLog('${so.name} tử trận.');
+      } else {
+        so.hp = o.finalHp.clamp(1, so.maxHp);
+        if (so.hp < so.maxHp * 0.5) kind = CasualtyKind.wounded;
       }
       var xp = 0;
       var ups = 0;
       if (kind != CasualtyKind.dead) {
         xp = 12 + 5 * o.kills + (won ? 15 : 0);
-        if (kind == CasualtyKind.retreated) xp ~/= 2;
         ups = addXp(so, xp);
         so.morale = (so.morale + (won ? 8 : -10)).clamp(0, 100);
       }
@@ -1100,8 +1199,9 @@ class GameRules {
     GameState s,
     String locId,
     List<int> squadIds,
-    Set<int> frontIds,
-  ) {
+    Set<int> frontIds, {
+    Map<int, Pos>? placement,
+  }) {
     ExpeditionResult fail(String m) => ExpeditionResult(ActionResult.fail(m));
     final blocked = _blocked(s);
     if (blocked != null) return fail(blocked.message);
@@ -1152,7 +1252,13 @@ class GameRules {
       List<Soldier> enemies, {
       required bool ambush,
     }) {
-      final rep = fight(s, squad, frontIds, enemies);
+      final rep = fight(
+        s,
+        squad,
+        frontIds,
+        enemies,
+        placement: ambush ? null : placement,
+      );
       res.battle = rep;
       res.ambush = ambush;
       res.casualties = applyBattle(s, squad, rep);
@@ -1236,8 +1342,8 @@ class GameRules {
             }
           } else if (roll < 0.75) {
             final victim = squad[r.nextInt(squad.length)];
-            victim.injuryDays = 2;
-            res.lines.add('${victim.name} dính bẫy và bị thương.');
+            victim.hp = max(1, victim.hp - (victim.maxHp * 0.3).round());
+            res.lines.add('${victim.name} dính bẫy và mất 30% HP.');
           } else {
             res.lines.add('Không tìm thấy gì đáng giá.');
           }

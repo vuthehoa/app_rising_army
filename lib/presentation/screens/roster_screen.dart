@@ -166,10 +166,24 @@ class _SoldierTile extends StatelessWidget {
                     Wrap(
                       spacing: 3,
                       children: [
-                        if (s.injured)
-                          Pill('Thương ${s.injuryDays}n', color: Pal.blood),
-                        if (s.training)
-                          Pill('Tập ${s.trainingDays}n', color: Pal.gold),
+                        if (s.wounded)
+                          Pill(
+                            'HP ${s.hp}/${s.maxHp}',
+                            color: s.hpFraction < 0.5 ? Pal.blood : Pal.steel,
+                          ),
+                        if (GameRules.facilityOf(
+                              ControllerScope.of(context).state!,
+                              s.id,
+                            ) !=
+                            null)
+                          Pill(
+                            facilityDefs[GameRules.facilityOf(
+                                  ControllerScope.of(context).state!,
+                                  s.id,
+                                )!.type]!
+                                .name,
+                            color: Pal.gold,
+                          ),
                         if (s.morale < 35)
                           const Pill('Tinh thần thấp', color: Pal.blood),
                       ],
@@ -231,8 +245,7 @@ class _Detail extends StatelessWidget {
     final so = soldier;
     final dv = deriveStats(so);
     final d = Dims(context);
-    final trainFree =
-        GameRules.trainingSlots(s) - s.roster.where((x) => x.training).length;
+    final fac = GameRules.facilityOf(s, so.id);
 
     final header = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -358,7 +371,8 @@ class _Detail extends StatelessWidget {
                 _kv('Máu', '${dv.maxHp}'),
                 _kv('Công', dv.attack.toStringAsFixed(1)),
                 _kv('Giảm sát thương', '${(dv.reduction * 100).round()}%'),
-                _kv('Tốc độ', '${dv.speed}'),
+                _kv('Tốc độ', '${dv.speed.toStringAsFixed(1)} m/s'),
+                _kv('Chu kỳ đánh', '${dv.interval.toStringAsFixed(1)} s'),
                 _kv('Chính xác', '${(dv.accuracy * 100).round()}%'),
               ],
             ),
@@ -399,64 +413,82 @@ class _Detail extends StatelessWidget {
       ),
     );
 
-    String? trainLock;
-    if (so.injured) {
-      trainLock = 'Đang bị thương';
-    } else if (so.training) {
-      trainLock = 'Đang huấn luyện';
-    } else if (trainFree <= 0) {
-      trainLock = 'Bãi tập hết chỗ';
-    }
     final train = Panel(
-      title: 'Huấn luyện',
+      title: 'Huấn luyện & chữa trị',
       trailing: Text(
-        'Chỗ trống $trainFree • ${GameRules.trainingDays(s)} ngày/buổi • 10 đồng xu',
-        style: const TextStyle(fontSize: 10, color: Pal.dim),
+        fac == null
+            ? 'Chưa ở công trình nào'
+            : 'Đang ở: ${facilityDefs[fac.type]!.name}',
+        style: const TextStyle(fontSize: 10, color: Pal.gold),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (so.training)
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Đang tập ${statNames[so.trainingStat]} (còn ${so.trainingDays} ngày).',
-                    style: const TextStyle(color: Pal.gold),
+          for (final st in Stat.values)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 78,
+                    child: Text(
+                      statNames[st]!,
+                      style: const TextStyle(fontSize: 11.5),
+                    ),
                   ),
-                ),
-                TextButton(
+                  Expanded(
+                    child: Bar(
+                      value: so.train[st]! / 100,
+                      color: Pal.gold,
+                      height: 8,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '${so.train[st]}%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
+          Text(
+            'HP ${so.hp}/${dv.maxHp}. Kéo binh sĩ vào công trình ở màn Trại, hoặc chọn bên dưới. Mỗi công trình tối đa ${Facility.capacity} người.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final f in s.facilities.where(
+                (f) => GameRules.takesAssignment(f.type),
+              ))
+                GameButton(
+                  dense: true,
+                  label:
+                      '${facilityDefs[f.type]!.name} ${f.assigned.length}/${Facility.capacity}',
+                  lockedReason: f.assigned.contains(so.id)
+                      ? 'Đang ở đây'
+                      : (f.assigned.length >= Facility.capacity ? 'Đầy' : null),
                   onPressed: () =>
-                      toast(context, controller.cancelTraining(so.id)),
-                  child: const Text('Hủy'),
+                      toast(context, controller.assignToFacility(so.id, f.id)),
                 ),
-              ],
-            )
-          else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final st in Stat.values)
-                  GameButton(
-                    dense: true,
-                    label:
-                        '${statNames[st]} ${so.stats[st]}→${so.stats[st]! + 1}',
-                    lockedReason:
-                        trainLock ??
-                        (so.stats[st]! >= GameRules.statCap(so)
-                            ? 'Giới hạn ${GameRules.statCap(so)}'
-                            : null),
-                    onPressed: () =>
-                        toast(context, controller.startTraining(so.id, st)),
-                  ),
-              ],
-            ),
-          if (so.injured)
-            Text(
-              'Bị thương: còn ${so.injuryDays} ngày hồi phục. Không thể xuất quân.',
-              style: const TextStyle(color: Pal.blood, fontSize: 11.5),
-            ),
+              if (fac != null)
+                GameButton(
+                  dense: true,
+                  danger: true,
+                  label: 'Rời công trình',
+                  onPressed: () => toast(context, controller.unassign(so.id)),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -750,7 +782,13 @@ class _EquipDialogState extends State<_EquipDialog> {
                               after.reduction * 100,
                               suffix: '%',
                             ),
-                            row('Tốc độ', before.speed, after.speed),
+                            row(
+                              'Tốc độ',
+                              before.speed,
+                              after.speed,
+                              digits: 1,
+                              suffix: ' m/s',
+                            ),
                             row(
                               'Chính xác',
                               before.accuracy * 100,

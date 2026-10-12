@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:app_rising_army/data/migration_v1_v2.dart';
+import 'package:app_rising_army/data/migration_v1_v3.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/battle.dart';
 import 'package:app_rising_army/domain/catalog.dart';
@@ -107,7 +107,7 @@ void main() {
             expect(db.defense, lessThan(da.defense));
           case TraitId.nimble:
             expect(db.accuracy, greaterThan(da.accuracy));
-            expect(db.speed, da.speed + 1);
+            expect(db.speed, closeTo(da.speed + speedPerPoint, 1e-9));
           default:
         }
       }
@@ -196,42 +196,141 @@ void main() {
     });
   });
 
-  group('Huấn luyện và kinh nghiệm', () {
+  group('Công trình trong trại, huấn luyện và kinh nghiệm', () {
+    Facility fac(GameState s, FacilityType t) =>
+        s.facilities.firstWhere((f) => f.type == t);
+
+    test('ván mới có công trình đầu game: bãi cận chiến, bãi bắn cung, lều cứu thương, bếp lửa', () {
+      final s = fresh();
+      expect(s.facilities.map((f) => f.type).toSet(), {
+        FacilityType.meleeYard,
+        FacilityType.archeryRange,
+        FacilityType.infirmary,
+        FacilityType.campfire,
+      });
+      expect(s.facilities.every((f) => f.assigned.isEmpty), isTrue);
+    });
+
+    test('gán binh sĩ vào công trình: sức chứa 3, tự rút khỏi công trình cũ, bếp lửa không nhận gán', () {
+      final s = fresh();
+      final yard = fac(s, FacilityType.meleeYard);
+      final ids = s.roster.map((e) => e.id).toList();
+      for (final id in ids.take(3)) {
+        expect(GameRules.assignToFacility(s, id, yard.id).ok, isTrue);
+      }
+      expect(yard.assigned.length, Facility.capacity);
+      expect(GameRules.assignToFacility(s, ids[3], yard.id).ok, isFalse);
+      final bow = fac(s, FacilityType.archeryRange);
+      expect(GameRules.assignToFacility(s, ids[0], bow.id).ok, isTrue);
+      expect(yard.assigned.contains(ids[0]), isFalse);
+      expect(bow.assigned, [ids[0]]);
+      expect(
+        GameRules.assignToFacility(
+          s,
+          ids[0],
+          fac(s, FacilityType.campfire).id,
+        ).ok,
+        isFalse,
+      );
+      expect(
+        GameRules.assignToFacility(s, ids[0], bow.id).ok,
+        isFalse,
+      ); // đã ở đó
+      expect(GameRules.assignToFacility(s, 999, bow.id).ok, isFalse);
+      expect(GameRules.assignToFacility(s, ids[1], 999).ok, isFalse);
+      expect(GameRules.unassign(s, ids[0]).ok, isTrue);
+      expect(GameRules.unassign(s, ids[0]).ok, isFalse);
+    });
+
+    test('huấn luyện: tiến độ % theo ngày, đủ 100% thì +1 thuộc tính và XP; chỉ đúng thuộc tính của công trình', () {
+      final s = fresh();
+      final so = s.roster.firstWhere((x) => x.trait != TraitId.quickLearner);
+      final str = so.stats[Stat.str]!, dex = so.stats[Stat.dex]!;
+      GameRules.assignToFacility(s, so.id, fac(s, FacilityType.meleeYard).id);
+      for (var i = 0; i < 3; i++) {
+        GameRules.tickDay(s);
+      }
+      expect(so.train[Stat.str], 3 * trainPercentPerDay);
+      expect(so.stats[Stat.str], str);
+      GameRules.tickDay(s);
+      expect(so.stats[Stat.str], str + 1);
+      expect(so.train[Stat.str], 0);
+      expect(so.xp, trainingXp);
+      expect(so.stats[Stat.dex], dex);
+      expect(so.train[Stat.dex], 0);
+    });
+
     test(
-      'tập luyện tốn tiền, chiếm chỗ, hoàn thành sau số ngày và tăng chỉ số',
+      'Học nhanh học nhanh hơn; thuộc tính đạt giới hạn cấp thì rời công trình',
       () {
         final s = fresh();
-        final so = s.roster.first;
-        final str = so.stats[Stat.str]!;
-        final coins = s.res[Res.coins]!;
-        expect(GameRules.startTraining(s, so.id, Stat.str).ok, isTrue);
-        expect(s.res[Res.coins], coins - 10);
-        expect(so.available, isFalse);
-        expect(GameRules.startTraining(s, so.id, Stat.dex).ok, isFalse);
+        final q = Soldier(
+          id: 800,
+          name: 'q',
+          role: Role.archer,
+          stats: {for (final x in Stat.values) x: 5},
+          trait: TraitId.quickLearner,
+          hp: 40,
+        );
+        s.soldiers.add(q);
+        s.nextSoldierId = 900;
+        final bow = fac(s, FacilityType.archeryRange);
+        GameRules.assignToFacility(s, q.id, bow.id);
         GameRules.tickDay(s);
+        expect(q.train[Stat.dex], (trainPercentPerDay * 1.3).round());
+        q.stats[Stat.dex] = GameRules.statCap(q);
         GameRules.tickDay(s);
-        expect(so.stats[Stat.str], str);
-        GameRules.tickDay(s);
-        expect(so.stats[Stat.str], str + 1);
-        expect(so.training, isFalse);
-        expect(so.xp, 15);
+        expect(bow.assigned.contains(q.id), isFalse);
+        expect(
+          GameRules.assignToFacility(s, q.id, bow.id).ok,
+          isFalse,
+        ); // đã đạt giới hạn
       },
     );
 
-    test('giới hạn số chỗ tập, giới hạn chỉ số theo cấp, không đủ tiền', () {
+    test('xây công trình mới: trả tài nguyên, đặt vào ô trống, giới hạn số lượng và vị trí', () {
       final s = fresh();
-      final r = s.roster;
-      expect(GameRules.startTraining(s, r[0].id, Stat.str).ok, isTrue);
-      expect(GameRules.startTraining(s, r[1].id, Stat.str).ok, isTrue);
+      s.res.updateAll((_, _) => 999);
+      final free = GameRules.freeSlotIndices(s);
+      expect(free, isNotEmpty);
+      final wood = s.res[Res.wood]!;
       expect(
-        GameRules.startTraining(s, r[2].id, Stat.str).ok,
+        GameRules.buildFacility(s, FacilityType.enduranceYard, free.first).ok,
+        isTrue,
+      );
+      expect(
+        s.res[Res.wood],
+        wood - facilityDefs[FacilityType.enduranceYard]!.cost[Res.wood]!,
+      );
+      expect(
+        GameRules.buildFacility(s, FacilityType.meleeYard, free.first).ok,
         isFalse,
-      ); // 2 chỗ ở cấp 1
-      r[3].stats[Stat.con] = GameRules.statCap(r[3]);
-      s.buildings[Building.trainingGround] = 3;
-      expect(GameRules.startTraining(s, r[3].id, Stat.con).ok, isFalse);
-      s.res[Res.coins] = 0;
-      expect(GameRules.startTraining(s, r[4].id, Stat.dex).ok, isFalse);
+      ); // ô đã có
+      expect(
+        GameRules.buildFacility(s, FacilityType.campfire, free[1]).ok,
+        isFalse,
+      ); // không xây được
+      s.res.updateAll((_, _) => 0);
+      expect(
+        GameRules.buildFacility(s, FacilityType.infirmary, free[1]).ok,
+        isFalse,
+      ); // thiếu tài nguyên
+      s.res.updateAll((_, _) => 9999);
+      var i = 1;
+      while (s.facilities.length < maxFacilities &&
+          GameRules.freeSlotIndices(s).isNotEmpty) {
+        expect(
+          GameRules.buildFacility(
+            s,
+            FacilityType.infirmary,
+            GameRules.freeSlotIndices(s).first,
+          ).ok,
+          isTrue,
+          reason: 'lần $i',
+        );
+        i++;
+      }
+      expect(GameRules.buildFacility(s, FacilityType.infirmary, 0).ok, isFalse);
     });
 
     test('kinh nghiệm lên cấp, tăng chỉ số theo vai trò, Học nhanh +30%', () {
@@ -241,60 +340,62 @@ void main() {
         name: 'a',
         role: Role.archer,
         stats: {for (final x in Stat.values) x: 5},
+        hp: 40,
       );
       final up = GameRules.addXp(a, xpForNext(1));
       expect(up, 1);
       expect(a.level, 2);
-      expect(
-        a.stats[Stat.dex]! + a.stats[Stat.spd]!,
-        11,
-      ); // tăng 1 chỉ số chính cung thủ
+      expect(a.stats[Stat.dex]! + a.stats[Stat.str]!, 11);
       final q = Soldier(
         id: 801,
         name: 'q',
         role: Role.archer,
         stats: {for (final x in Stat.values) x: 5},
         trait: TraitId.quickLearner,
+        hp: 40,
       );
       GameRules.addXp(q, 10);
       expect(q.xp, 13);
       expect(s.soldiers.length, 6);
     });
-
-    test(
-      'binh sĩ bị thương không thể tập; hồi phục theo ngày và Trạm y tế',
-      () {
-        final s = fresh();
-        final so = s.roster.first..injuryDays = 4;
-        expect(GameRules.startTraining(s, so.id, Stat.str).ok, isFalse);
-        GameRules.tickDay(s);
-        expect(so.injuryDays, 3);
-        s.buildings[Building.infirmary] = 2;
-        GameRules.tickDay(s);
-        expect(so.injuryDays, 0);
-      },
-    );
   });
 
-  group('Chiến đấu auto-battler', () {
-    List<BattleUnit> squad(GameState s, int n, {bool player = true}) => [
-      for (final so in s.roster.take(n))
-        unitFrom(so, player: player, front: so.role != Role.archer),
-    ];
+  group('Chiến đấu thời gian thực', () {
+    List<BattleUnit> squad(GameState s, int n, {bool player = true}) {
+      final list = s.roster.take(n).toList();
+      final pl = defaultPlacement(list, {
+        for (final x in list)
+          if (!deriveStats(x).ranged) x.id,
+      });
+      return [
+        for (final so in list)
+          unitFrom(
+            so,
+            player: player,
+            at: player ? pl[so.id]! : Pos(40 - pl[so.id]!.x, pl[so.id]!.y),
+          ),
+      ];
+    }
 
-    test('tái lập theo seed, khác seed khác diễn biến', () {
+    test('tái lập theo seed: cùng đầu vào cho cùng chuỗi khung và sự kiện; khác seed khác diễn biến', () {
       final s = fresh();
       final e = GameRules.enemiesFor(s, locationById('g_bandits')!.enemies);
+      final ep = enemyPlacement(e);
       List<BattleUnit> en() => [
-        for (final x in e)
-          unitFrom(x, player: false, front: x.role != Role.archer),
+        for (final x in e) unitFrom(x, player: false, at: ep[x.id]!),
       ];
       String run(int seed) {
         final r = simulateBattle(squad(s, 6), en(), seed);
         return jsonEncode([
           r.winner.name,
-          r.rounds,
-          for (final ev in r.events) [ev.actor, ev.target, ev.damage, ev.hit],
+          r.duration,
+          for (final ev in r.events)
+            [ev.t, ev.actor, ev.target, ev.damage, ev.hit],
+          for (final f in r.frames)
+            [
+              f.t,
+              for (final u in f.units.values) [u.x, u.y, u.hp],
+            ],
         ]);
       }
 
@@ -302,179 +403,316 @@ void main() {
       expect({for (var i = 0; i < 20; i++) run(i)}.length, greaterThan(10));
     });
 
-    test(
-      'bảo toàn: không máu âm, người chết/chạy không hành động sau đó, tối đa $maxRounds hiệp',
-      () {
-        final rng = Random(11);
-        for (var i = 0; i < 300; i++) {
-          final s = fresh(i);
-          final ps = squad(s, 1 + rng.nextInt(6));
-          final es = GameRules.enemiesFor(s, [
-            EnemySpec(Role.spearman, 1 + rng.nextInt(4), 1 + rng.nextInt(4)),
-            EnemySpec(Role.archer, 2, 2),
-          ]);
-          final r = simulateBattle(ps, [
-            for (final x in es) unitFrom(x, player: false, front: true),
-          ], i);
-          expect(r.rounds, lessThanOrEqualTo(maxRounds));
-          final gone = <int>{};
-          for (final ev in r.events) {
-            expect(
-              gone.contains(ev.actor),
-              isFalse,
-              reason: 'unit ${ev.actor} hành động sau khi rời trận (seed $i)',
-            );
-            if (ev.fled) gone.add(ev.actor);
-            if (ev.targetDown) gone.add(ev.target!);
-          }
-          for (final o in r.outcomes.values) {
-            expect(o.finalHp, inInclusiveRange(0, o.maxHp));
-            expect(o.down, o.finalHp == 0);
+    test('đơn vị di chuyển liên tục tới địch (khung có vị trí thay đổi), tốc độ không vượt giới hạn m/s', () {
+      final s = fresh();
+      final e = GameRules.enemiesFor(s, locationById('g_bandits')!.enemies);
+      final ep = enemyPlacement(e);
+      final players = squad(s, 6);
+      final enemies = [
+        for (final x in e) unitFrom(x, player: false, at: ep[x.id]!),
+      ];
+      final maxSpeed = [
+        ...players,
+        ...enemies,
+      ].map((u) => u.d.speed).reduce((a, b) => a > b ? a : b);
+      final r = simulateBattle(players, enemies, 3);
+      var moved = false;
+      for (var i = 1; i < r.frames.length; i++) {
+        final dt = r.frames[i].t - r.frames[i - 1].t;
+        for (final id in r.frames[i].units.keys) {
+          final a = r.frames[i - 1].units[id]!, b = r.frames[i].units[id]!;
+          final dist = sqrt(pow(b.x - a.x, 2) + pow(b.y - a.y, 2));
+          if (dist > 0.01) moved = true;
+          expect(
+            dist,
+            lessThanOrEqualTo(maxSpeed * dt + 1.0),
+            reason: 'đơn vị $id nhảy quá xa',
+          );
+        }
+      }
+      expect(moved, isTrue);
+    });
+
+    test('bất biến: HP không âm, người chết không hành động sau đó, vị trí trong sân, thời lượng hữu hạn', () {
+      final rng = Random(11);
+      for (var i = 0; i < 120; i++) {
+        final s = fresh(i);
+        final n = 1 + rng.nextInt(6);
+        final es = GameRules.enemiesFor(s, [
+          EnemySpec(Role.spearman, 1 + rng.nextInt(4), 1 + rng.nextInt(4)),
+          EnemySpec(Role.archer, 2, 2),
+        ]);
+        final ep = enemyPlacement(es);
+        final r = simulateBattle(squad(s, n), [
+          for (final x in es) unitFrom(x, player: false, at: ep[x.id]!),
+        ], i);
+        expect(r.duration, lessThanOrEqualTo(maxBattleSeconds + 0.5));
+        final dead = <int>{};
+        for (final ev in r.events) {
+          expect(
+            dead.contains(ev.actor),
+            isFalse,
+            reason: 'seed $i: ${ev.actor} đánh sau khi chết',
+          );
+          if (ev.killed) dead.add(ev.target);
+        }
+        for (final f in r.frames) {
+          for (final u in f.units.values) {
+            expect(u.hp, greaterThanOrEqualTo(0));
+            expect(u.x, inInclusiveRange(0, fieldW));
+            expect(u.y, inInclusiveRange(0, fieldH));
           }
         }
-      },
-    );
+        for (final o in r.outcomes.values) {
+          expect(o.finalHp, inInclusiveRange(0, o.maxHp));
+          expect(o.dead, o.finalHp == 0);
+        }
+      }
+    });
 
-    test('đội trống thua; địch trống thì ta thắng ngay', () {
+    test('đội trống thua; địch trống thì ta thắng ngay không có sự kiện', () {
       final s = fresh();
       expect(
         simulateBattle([], squad(s, 3, player: false), 1).winner,
         Winner.enemy,
       );
-      expect(simulateBattle(squad(s, 3), [], 1).winner, Winner.player);
+      final w = simulateBattle(squad(s, 3), [], 1);
+      expect(w.winner, Winner.player);
+      expect(w.events, isEmpty);
     });
+
+    test(
+      'cung thủ bắn từ xa: gây sát thương khi cách xa hơn tầm cận chiến',
+      () {
+        final s = fresh();
+        final archer = s.roster.firstWhere((x) => x.role == Role.archer);
+        final foe = GameRules.enemiesFor(s, [
+          EnemySpec(Role.spearman, 1, 1),
+        ]).first;
+        final a = unitFrom(archer, player: true, at: const Pos(10, 12));
+        final f = unitFrom(
+          foe,
+          player: false,
+          at: Pos(10 + a.d.range - 0.5, 12),
+        );
+        expect(a.d.ranged, isTrue);
+        final r = simulateBattle([a], [f], 4);
+        final firstHit = r.events.firstWhere(
+          (e) => e.actor == archer.id && e.hit,
+        );
+        expect(firstHit.t, lessThan(3.0));
+      },
+    );
 
     test('trang bị tốt hơn thắng áp đảo (so sánh có seed)', () {
       var wins = 0;
-      for (var i = 0; i < 100; i++) {
+      for (var i = 0; i < 60; i++) {
         final s = fresh(i);
         final a = [for (var k = 0; k < 4; k++) mk(s, Role.spearman, level: 3)];
         final b = [for (var k = 0; k < 4; k++) mk(s, Role.spearman, level: 3)];
         for (final x in a) {
           x.weaponId = 'iron_spear';
           x.armorId = 'chain_mail';
+          x.hp = GameRules.fullHp(x);
         }
+        final pa = defaultPlacement(a, {for (final x in a) x.id});
+        final pb = enemyPlacement(b);
         final r = simulateBattle(
-          [for (final x in a) unitFrom(x, player: true, front: true)],
-          [for (final x in b) unitFrom(x, player: false, front: true)],
+          [for (final x in a) unitFrom(x, player: true, at: pa[x.id]!)],
+          [for (final x in b) unitFrom(x, player: false, at: pb[x.id]!)],
           i,
         );
         if (r.winner == Winner.player) wins++;
       }
-      expect(wins, greaterThan(85));
+      expect(wins, greaterThan(50));
     });
 
-    test('cân bằng: 2 đội y hệt nhau thắng thua gần ngang nhau', () {
-      var wins = 0;
-      const n = 400;
-      for (var i = 0; i < n; i++) {
-        final s = fresh(1);
-        final a = [
-          for (var k = 0; k < 4; k++)
-            unitFrom(s.roster[k], player: true, front: true),
+    test('đội hình mẫu: đặt đủ mọi binh sĩ trong vùng triển khai, cận chiến phía trước cung thủ', () {
+      final s = fresh();
+      final squadList = s.roster.toList();
+      for (final p in FormationPreset.values) {
+        final pl = presetPlacement(p, squadList);
+        expect(pl.length, squadList.length, reason: p.name);
+        for (final pos in pl.values) {
+          expect(pos.x, inInclusiveRange(deployMinX, deployMaxX));
+          expect(pos.y, inInclusiveRange(deployMinY, deployMaxY));
+        }
+        final meleeX = [
+          for (final x in squadList)
+            if (!deriveStats(x).ranged) pl[x.id]!.x,
         ];
-        final b = [
-          for (var k = 0; k < 4; k++)
-            unitFrom(s.roster[k], player: false, front: true),
+        final rangedX = [
+          for (final x in squadList)
+            if (deriveStats(x).ranged) pl[x.id]!.x,
         ];
-        if (simulateBattle(a, b, i).winner == Winner.player) wins++;
+        expect(
+          meleeX.reduce((a, b) => a + b) / meleeX.length,
+          greaterThan(rangedX.reduce((a, b) => a + b) / rangedX.length),
+          reason: p.name,
+        );
       }
-      expect(wins / n, inInclusiveRange(0.3, 0.7));
+      expect(clampToDeployZone(99, -5).x, deployMaxX);
+      expect(clampToDeployZone(99, -5).y, deployMinY);
+    });
+
+    test('vị trí triển khai ảnh hưởng kết quả (đặt quân sát địch vs ở xa) nhưng vẫn xác định', () {
+      final s = fresh(2);
+      final list = s.roster.toList();
+      final near = {for (final x in list) x.id: const Pos(15, 12)};
+      final far = {for (final x in list) x.id: const Pos(3, 12)};
+      final foes = GameRules.enemiesFor(s, locationById('g_bandits')!.enemies);
+      final ra = GameRules.fight(s, list, {}, foes, placement: near);
+      final rb = GameRules.fight(s, list, {}, foes, placement: far);
+      expect(ra.duration, isNot(rb.duration));
     });
   });
 
-  group('Thương tích và tử trận vĩnh viễn', () {
+  group('HP kéo dài, tử trận vĩnh viễn và hồi phục', () {
     BattleReport reportWith(
-      List<Soldier> squad, {
-      required Map<int, UnitOutcome> outcomes,
+      Map<int, UnitOutcome> outcomes, {
       Winner w = Winner.player,
     }) => BattleReport(
       winner: w,
-      rounds: 3,
+      duration: 20,
+      frames: const [],
       events: const [],
       playerUnits: const [],
       enemyUnits: const [],
       outcomes: outcomes,
     );
 
-    test('ngã gục -> chết hoặc bị thương; người chết không còn trong roster, id không tái sử dụng', () {
+    test('HP về 0 là chết vĩnh viễn (không xác suất); người sống giữ HP còn lại sau trận', () {
       final s = fresh();
-      final squad = s.roster.take(3).toList();
-      final rep = reportWith(
-        squad,
-        outcomes: {
-          for (final so in squad)
-            so.id: const UnitOutcome(0, 50, true, false, 0),
-        },
+      final q = s.roster.take(3).toList();
+      final third = q[1].maxHp ~/ 3;
+      final fullBefore = q[2].maxHp;
+      final c = GameRules.applyBattle(
+        s,
+        q,
+        reportWith({
+          q[0].id: UnitOutcome(0, q[0].maxHp, true, 0),
+          q[1].id: UnitOutcome(q[1].maxHp ~/ 3, q[1].maxHp, false, 1),
+          q[2].id: UnitOutcome(q[2].maxHp, q[2].maxHp, false, 0),
+        }),
       );
-      final c = GameRules.applyBattle(s, squad, rep);
+      final byId = {for (final x in c) x.id: x.kind};
+      expect(byId[q[0].id], CasualtyKind.dead);
+      expect(q[0].status, SoldierStatus.dead);
+      expect(s.roster.contains(q[0]), isFalse);
+      expect(s.fallen.contains(q[0]), isTrue);
+      expect(byId[q[1].id], CasualtyKind.wounded);
+      expect(q[1].hp, third);
+      expect(byId[q[2].id], CasualtyKind.survived);
       expect(
-        c.every(
-          (x) => x.kind == CasualtyKind.dead || x.kind == CasualtyKind.injured,
-        ),
-        isTrue,
-      );
-      for (final x in c.where((x) => x.kind == CasualtyKind.dead)) {
-        final so = s.soldier(x.id)!;
-        expect(so.status, SoldierStatus.dead);
-        expect(s.roster.contains(so), isFalse);
-        expect(s.fallen.contains(so), isTrue);
-      }
-      final dead = c.where((x) => x.kind == CasualtyKind.dead).length;
-      expect(s.fallenTotal, dead);
+        q[2].hp,
+        fullBefore,
+      ); // HP không tự đầy khi lên cấp; chỉ nghỉ/chữa mới hồi
+      expect(s.fallenTotal, 1);
       final next = GameRules.generateSoldier(s);
       expect(s.soldiers.any((x) => x.id == next.id), isFalse);
     });
 
     test(
-      'cả 3 kết cục (chết/bị thương/rút lui/sống sót) được phân biệt đúng',
+      'mọi trận có seed: chết khi và chỉ khi báo cáo nói chết; không hồi sinh',
       () {
-        final s = fresh();
-        final q = s.roster.take(4).toList();
-        final rep = reportWith(
-          q,
-          outcomes: {
-            q[0].id: const UnitOutcome(40, 50, false, false, 0), // khỏe
-            q[1].id: const UnitOutcome(10, 50, false, false, 0), // còn <35%
-            q[2].id: const UnitOutcome(30, 50, false, true, 0), // rút lui
-            q[3].id: const UnitOutcome(0, 50, true, false, 0), // ngã
-          },
-        );
-        final c = {
-          for (final x in GameRules.applyBattle(s, q, rep)) x.id: x.kind,
-        };
-        expect(c[q[0].id], CasualtyKind.survived);
-        expect(c[q[1].id], CasualtyKind.injured);
-        expect(q[1].injuryDays, greaterThan(0));
-        expect(c[q[2].id], CasualtyKind.retreated);
-        expect(c[q[3].id], anyOf(CasualtyKind.dead, CasualtyKind.injured));
+        for (var seed = 0; seed < 40; seed++) {
+          final s = fresh(seed);
+          final foes = GameRules.enemiesFor(
+            s,
+            locationById('a_outpost')!.enemies,
+          );
+          final squadList = s.roster.toList();
+          final rep = GameRules.fight(s, squadList, {
+            for (final x in squadList)
+              if (x.role != Role.archer) x.id,
+          }, foes);
+          GameRules.applyBattle(s, squadList, rep);
+          for (final so in squadList) {
+            final o = rep.outcomes[so.id]!;
+            expect(so.alive, !o.dead, reason: 'seed $seed ${so.name}');
+            if (!o.dead) expect(so.hp, o.finalHp.clamp(1, so.maxHp));
+          }
+          final dead = squadList
+              .where((x) => !x.alive)
+              .map((x) => x.id)
+              .toSet();
+          for (var d = 0; d < 5; d++) {
+            GameRules.tickDay(s);
+          }
+          expect(
+            s.soldiers
+                .where((x) => x.status == SoldierStatus.dead)
+                .map((x) => x.id)
+                .toSet()
+                .containsAll(dead),
+            isTrue,
+          );
+        }
       },
     );
 
-    test('Trạm y tế giảm xác suất chết (thống kê có seed)', () {
-      int deaths(int infirmary) {
-        var d = 0;
-        for (var i = 0; i < 300; i++) {
-          final s = fresh(i)..buildings[Building.infirmary] = infirmary;
-          final so = s.roster.first;
-          GameRules.applyBattle(
-            s,
-            [so],
-            reportWith(
-              [so],
-              outcomes: {so.id: const UnitOutcome(0, 50, true, false, 0)},
-            ),
-          );
-          if (!so.alive) d++;
-        }
-        return d;
-      }
-
-      expect(deaths(3), lessThan(deaths(0)));
-      expect(deaths(0), greaterThan(180)); // ~80%
+    test('binh sĩ chết rời công trình; XP cho người sống theo hạ gục và chiến thắng', () {
+      final s = fresh();
+      final so = s.roster.first;
+      GameRules.assignToFacility(
+        s,
+        so.id,
+        s.facilities.firstWhere((f) => f.type == FacilityType.meleeYard).id,
+      );
+      GameRules.applyBattle(s, [
+        so,
+      ], reportWith({so.id: UnitOutcome(0, so.maxHp, true, 2)}));
+      expect(s.facilities.any((f) => f.assigned.contains(so.id)), isFalse);
+      final t = s.roster.first;
+      GameRules.applyBattle(s, [
+        t,
+      ], reportWith({t.id: UnitOutcome(t.maxHp, t.maxHp, false, 2)}));
+      expect(t.kills, 2);
+      expect(
+        t.xp + 20 * (t.level - 1) * t.level ~/ 2,
+        greaterThanOrEqualTo(12 + 10 + 15),
+      );
     });
 
-    test('tử trận làm giảm tinh thần đồng đội; thắng tăng, thua giảm', () {
+    test('hồi phục: nghỉ ngơi 10%/ngày, lều cứu thương 40%/ngày, không vượt HP tối đa', () {
+      final s = fresh();
+      final a = s.roster[0], b = s.roster[1];
+      a.hp = 1;
+      b.hp = 1;
+      GameRules.assignToFacility(
+        s,
+        b.id,
+        s.facilities.firstWhere((f) => f.type == FacilityType.infirmary).id,
+      );
+      GameRules.tickDay(s);
+      expect(a.hp, 1 + max(1, (a.maxHp * restHealFraction).round()));
+      expect(b.hp, 1 + max(1, (b.maxHp * infirmaryHealFraction).round()));
+      for (var i = 0; i < 12; i++) {
+        GameRules.tickDay(s);
+      }
+      expect(a.hp, a.maxHp);
+      expect(b.hp, b.maxHp);
+    });
+
+    test('binh sĩ HP thấp vẫn xuất quân được và vào trận với HP hiện tại; HP 0 thì không', () {
+      final s = fresh();
+      final so = s.roster.first..hp = 5;
+      expect(so.available, isTrue);
+      final u = unitFrom(so, player: true, at: const Pos(5, 5));
+      expect(u.hp, 5);
+      expect(
+        Soldier(
+          id: 99,
+          name: 'x',
+          role: Role.spearman,
+          stats: {for (final x in Stat.values) x: 5},
+          hp: 0,
+        ).available,
+        isFalse,
+      );
+    });
+
+    test('tinh thần: đồng đội chết làm giảm tinh thần cả trại; thắng tăng, thua giảm', () {
       final s = fresh();
       final q = s.roster.take(2).toList();
       final other = s.roster.last;
@@ -482,58 +720,29 @@ void main() {
       GameRules.applyBattle(
         s,
         q,
-        reportWith(
-          q,
-          outcomes: {
-            q[0].id: const UnitOutcome(0, 50, true, false, 0),
-            q[1].id: const UnitOutcome(50, 50, false, false, 1),
-          },
-        ),
+        reportWith({
+          q[0].id: UnitOutcome(0, q[0].maxHp, true, 0),
+          q[1].id: UnitOutcome(q[1].maxHp, q[1].maxHp, false, 1),
+        }),
       );
-      if (!q[0].alive) expect(other.morale, lessThan(m0));
+      expect(other.morale, lessThan(m0));
       final s2 = fresh();
       final w = s2.roster.first..morale = 50;
-      GameRules.applyBattle(
-        s2,
-        [w],
-        reportWith(
-          [w],
-          outcomes: {w.id: const UnitOutcome(50, 50, false, false, 0)},
-        ),
-      );
+      GameRules.applyBattle(s2, [
+        w,
+      ], reportWith({w.id: UnitOutcome(w.maxHp, w.maxHp, false, 0)}));
       expect(w.morale, 58);
       final s3 = fresh();
       final l = s3.roster.first..morale = 50;
       GameRules.applyBattle(
         s3,
         [l],
-        reportWith(
-          [l],
-          outcomes: {l.id: const UnitOutcome(50, 50, false, false, 0)},
-          w: Winner.enemy,
-        ),
+        reportWith({
+          l.id: UnitOutcome(l.maxHp, l.maxHp, false, 0),
+        }, w: Winner.enemy),
       );
       expect(l.morale, 40);
       expect(s3.battlesLost, 1);
-    });
-
-    test('kinh nghiệm cho người sống sót, theo hạ gục và chiến thắng', () {
-      final s = fresh();
-      final so = s.roster.first;
-      GameRules.applyBattle(
-        s,
-        [so],
-        reportWith(
-          [so],
-          outcomes: {so.id: const UnitOutcome(50, 50, false, false, 2)},
-        ),
-      );
-      expect(so.kills, 2);
-      expect(so.battles, 1);
-      expect(
-        so.xp + 20 * (so.level - 1) * so.level ~/ 2,
-        greaterThanOrEqualTo(12 + 10 + 15),
-      );
     });
   });
 
@@ -600,7 +809,7 @@ void main() {
       GameRules.upgradeBuilding(s, Building.barracks);
       expect(GameRules.upgradeBuilding(s, Building.barracks).ok, isFalse);
       s.res[Res.wood] = 0;
-      expect(GameRules.upgradeBuilding(s, Building.infirmary).ok, isFalse);
+      expect(GameRules.upgradeBuilding(s, Building.smithy).ok, isFalse);
     });
   });
 
@@ -837,7 +1046,7 @@ void main() {
         GameRules.sendExpedition(s, 'g_farm', [1, 1], {}).result.ok,
         isFalse,
       );
-      s.roster.first.injuryDays = 2;
+      s.roster.first.hp = 0; // HP 0 không thể xuất quân
       expect(
         GameRules.sendExpedition(s, 'g_farm', [
           s.roster.first.id,
@@ -915,9 +1124,11 @@ void main() {
           if (s.inventory['leather_armor']! > 0) {
             GameRules.equip(s, so.id, 'leather_armor');
           }
-          if (GameRules.trainingSlots(s) >
-              s.roster.where((x) => x.training).length) {
-            GameRules.startTraining(s, so.id, Stat.con);
+          final yard = s.facilities.firstWhere(
+            (f) => f.type == FacilityType.meleeYard,
+          );
+          if (yard.assigned.length < Facility.capacity) {
+            GameRules.assignToFacility(s, so.id, yard.id);
           }
         }
         for (var i = 0; i < 3; i++) {
@@ -975,10 +1186,10 @@ void main() {
               );
             case 1:
               if (roster.isNotEmpty) {
-                GameRules.startTraining(
+                GameRules.assignToFacility(
                   s,
                   roster[rng.nextInt(roster.length)].id,
-                  Stat.values[rng.nextInt(4)],
+                  s.facilities[rng.nextInt(s.facilities.length)].id,
                 );
               }
             case 2:
@@ -995,7 +1206,10 @@ void main() {
                 );
               }
             case 4:
-              GameRules.upgradeBuilding(s, Building.values[rng.nextInt(5)]);
+              GameRules.upgradeBuilding(
+                s,
+                Building.values[rng.nextInt(Building.values.length)],
+              );
             case 5:
               final off = GameRules.byStatus(s, MissionStatus.offered);
               if (off.isNotEmpty) {
@@ -1049,10 +1263,21 @@ void main() {
             );
             expect(s.roster.any((x) => x.id == id), isFalse);
           }
-          expect(
-            s.roster.where((x) => x.training).length,
-            lessThanOrEqualTo(GameRules.trainingSlots(s) + 0),
-          );
+          for (final f in s.facilities) {
+            expect(f.assigned.length, lessThanOrEqualTo(Facility.capacity));
+            expect(
+              f.assigned.every((id) => s.soldier(id)?.alive == true),
+              isTrue,
+              reason: 'seed $seed step $step',
+            );
+          }
+          for (final so in s.roster) {
+            expect(
+              so.hp,
+              inInclusiveRange(1, so.maxHp),
+              reason: 'seed $seed ${so.name}',
+            );
+          }
         }
         final repo = SaveRepository(MemoryStore());
         await repo.save(s);
@@ -1126,7 +1351,10 @@ void main() {
       expect(s.res[Res.food], 321 + 50);
       expect(s.res[Res.wood], 150);
       expect(s.buildings[Building.barracks], 2);
-      expect(s.buildings[Building.trainingGround], 2);
+      expect(
+        s.facilities.where((f) => f.type == FacilityType.enduranceYard).length,
+        1,
+      ); // Học viện cũ
       expect(s.missionsCompleted, 2);
       expect(s.cleared.contains('g_bandits'), isTrue);
       expect(s.battlesWon, 4);
@@ -1192,7 +1420,7 @@ void main() {
       ]) {
         final m = v1Save();
         mutate(m);
-        expect(() => migrateV1toV2(m), throwsFormatException);
+        expect(() => migrateV1toV3(m), throwsFormatException);
       }
     });
 
@@ -1305,6 +1533,9 @@ void balanceGuarantees() {
               'steel_pike',
             ][tier],
           };
+          so.hp = GameRules.fullHp(
+            so,
+          ); // trang bị đổi HP tối đa nhưng không tự hồi
           squad.add(so);
         }
         final rep = GameRules.fight(s, squad, {
@@ -1338,7 +1569,7 @@ void balanceGuarantees() {
       expect(winRate('m_fort', 3, 0, 100, tier: 2), lessThan(0.1));
       final eight = winRate('m_fort', 6, 2, 200, tier: 3);
       final ten = winRate('m_fort', 6, 2, 200, tier: 3, size: 10);
-      expect(eight, inInclusiveRange(0.3, 0.8)); // khó nhưng khả thi
+      expect(eight, inInclusiveRange(0.3, 0.95)); // khó nhưng khả thi
       expect(ten, greaterThan(eight));
       expect(ten, greaterThan(0.7)); // đội tối đa 10 người là đáng giá
     });

@@ -25,7 +25,6 @@ const roleBlurb = <Role, String>{
 const statNames = <Stat, String>{
   Stat.str: 'Sức mạnh',
   Stat.dex: 'Khéo léo',
-  Stat.spd: 'Tốc độ',
   Stat.con: 'Thể trạng',
 };
 
@@ -37,18 +36,12 @@ const slotNames = <Slot, String>{
 
 const buildingNames = <Building, String>{
   Building.barracks: 'Doanh trại',
-  Building.trainingGround: 'Bãi tập',
-  Building.infirmary: 'Trạm y tế',
   Building.smithy: 'Lò rèn',
   Building.tavern: 'Quán rượu',
 };
 
 const buildingBlurb = <Building, String>{
   Building.barracks: 'Sức chứa binh sĩ: 6 + 4 mỗi cấp.',
-  Building.trainingGround:
-      'Số chỗ tập: 1 + cấp. Thời gian tập: 3 / 2 / 1 ngày.',
-  Building.infirmary:
-      'Chữa thương nhanh hơn và giảm nguy cơ tử trận của binh sĩ gục ngã.',
   Building.smithy:
       'Mở khóa trang bị theo bậc (bằng cấp lò rèn) và giảm giá mua.',
   Building.tavern: 'Tinh thần cân bằng của quân đội +5 mỗi cấp.',
@@ -261,7 +254,7 @@ const itemDefs = <String, ItemDef>{
     slot: Slot.accessory,
     tier: 1,
     price: 30,
-    bonus: {Stat.spd: 1},
+    speed: 1,
   ),
   'bone_amulet': ItemDef(
     id: 'bone_amulet',
@@ -286,7 +279,7 @@ const itemDefs = <String, ItemDef>{
     slot: Slot.accessory,
     tier: 2,
     price: 90,
-    bonus: {Stat.spd: 2},
+    speed: 2,
     reqLevel: 2,
   ),
   'saint_amulet': ItemDef(
@@ -1117,3 +1110,75 @@ VendorDef? vendorById(String id) {
   }
   return null;
 }
+
+// ---- Công trình đặt trong trại (Phase 4: tái dựng theo ảnh/clip chính thức) ----
+
+class FacilityDef {
+  const FacilityDef(
+    this.name,
+    this.blurb,
+    this.cost, {
+    this.trains,
+    this.verified = false,
+  });
+
+  final String name;
+  final String blurb;
+  final Cost cost;
+
+  /// Thuộc tính được huấn luyện (null nếu không phải công trình huấn luyện).
+  final Stat? trains;
+
+  /// Tên/hiệu ứng được xác minh trực tiếp bằng ảnh/clip chính thức.
+  final bool verified;
+}
+
+const facilityDefs = <FacilityType, FacilityDef>{
+  FacilityType.meleeYard: FacilityDef(
+    'Bãi tập cận chiến',
+    'Bù nhìn tập đánh: huấn luyện Sức mạnh. Tối đa 3 người.',
+    {Res.wood: 40, Res.coins: 30},
+    trains: Stat.str,
+  ),
+  FacilityType.archeryRange: FacilityDef(
+    'Bãi bắn cung',
+    'Bia bắn: huấn luyện Khéo léo. Tối đa 3 người.',
+    {Res.wood: 40, Res.coins: 30},
+    trains: Stat.dex,
+  ),
+  FacilityType.enduranceYard: FacilityDef(
+    'Bãi rèn thể lực',
+    'Rèn sức bền: huấn luyện Thể trạng. Tối đa 3 người. (Tên và hiệu ứng là đề xuất.)',
+    {Res.wood: 50, Res.iron: 10, Res.coins: 30},
+    trains: Stat.con,
+  ),
+  FacilityType.infirmary: FacilityDef(
+    'Lều cứu thương',
+    'Chữa vết thương và hồi sức cho binh sĩ, sẵn sàng ra trận. Tối đa 3 người.',
+    {Res.wood: 40, Res.coins: 40},
+    verified: true,
+  ),
+  FacilityType.campfire: FacilityDef(
+    'Bếp lửa trại',
+    'Nơi tập hợp binh sĩ. Có sẵn, không xây thêm.',
+    {},
+    verified: true,
+  ),
+};
+
+const buildableFacilities = [
+  FacilityType.meleeYard,
+  FacilityType.archeryRange,
+  FacilityType.enduranceYard,
+  FacilityType.infirmary,
+];
+
+/// Số công trình tối đa trong trại (PROPOSED).
+const maxFacilities = 9;
+
+/// Tiến độ huấn luyện mỗi ngày (phần trăm) cho binh sĩ đang được gán (PROPOSED: UNKNOWN ở game gốc).
+const trainPercentPerDay = 25;
+
+/// Hồi HP mỗi ngày theo tỷ lệ HP tối đa (PROPOSED).
+const restHealFraction = 0.10;
+const infirmaryHealFraction = 0.40;

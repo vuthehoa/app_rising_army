@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import '../../domain/battle.dart';
 import '../../domain/catalog.dart';
 import '../../domain/rules.dart';
+import '../../domain/stats.dart';
 import '../widgets/art.dart';
 import '../widgets/common.dart';
 
@@ -99,7 +100,7 @@ class ResultScreen extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                'Số hiệp: ${rep.rounds}',
+                'Thời lượng trận: ${rep.duration.toStringAsFixed(0)} giây',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -141,11 +142,10 @@ class ResultScreen extends StatelessWidget {
                       final so = s.soldier(cs.id);
                       final (label, color) = switch (cs.kind) {
                         CasualtyKind.dead => ('Tử trận', Pal.blood),
-                        CasualtyKind.injured => (
-                          'Bị thương${so != null && so.injured ? ' (${so.injuryDays} ngày)' : ''}',
+                        CasualtyKind.wounded => (
+                          'Bị thương${so != null ? ' (HP ${so.hp}/${so.maxHp})' : ''}',
                           const Color(0xFFE08A3A),
                         ),
-                        CasualtyKind.retreated => ('Rút lui', Pal.steel),
                         CasualtyKind.survived => ('Sống sót', Pal.moss),
                       };
                       return Padding(

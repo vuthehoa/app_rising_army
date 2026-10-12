@@ -455,8 +455,8 @@ void main() {
   });
 
   group('Lưu game và tương thích save v2', () {
-    test('không thay đổi phiên bản save: các trường cửa hàng là tùy chọn', () {
-      expect(SaveRepository.latestVersion, 2);
+    test('phiên bản save hiện hành là 3 (Phase 4); các trường cửa hàng vẫn là tùy chọn', () {
+      expect(SaveRepository.latestVersion, 3);
     });
 
     test('save/load sau giao dịch giữ nguyên tiền, kho đồ, tồn kho, đang ở thành phố, số lần giao dịch', () async {
@@ -477,14 +477,14 @@ void main() {
       );
     });
 
-    test('save v2 cũ (chưa có shops/visiting/tradeCount) vẫn đọc được và dùng bình thường', () async {
+    test('save thiếu trường cửa hàng tùy chọn (shops/visiting/tradeCount) vẫn đọc được và dùng bình thường', () async {
       final j = jsonDecode(jsonEncode(fresh().toJson())) as Map<String, dynamic>
         ..remove('shops')
         ..remove('visiting')
         ..remove('tradeCount');
       final data = jsonEncode(j);
       final env = jsonEncode({
-        'version': 2,
+        'version': 3,
         'checksum': SaveRepository.checksum(data),
         'data': data,
       });

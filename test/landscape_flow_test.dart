@@ -1,5 +1,6 @@
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/main.dart';
@@ -43,6 +44,17 @@ Future<void> tapText(WidgetTester tester, String text, {int index = 0}) async {
   await tester.pumpAndSettle();
 }
 
+/// Xem trận thời gian thực chạy hết (đặt x3, bơm đồng hồ giả) cho tới khi nút "Xem kết quả" hiện.
+Future<void> watchBattle(WidgetTester tester) async {
+  final x3 = find.text('x3');
+  if (x3.evaluate().isNotEmpty) {
+    await tester.tap(x3.first);
+  }
+  for (var i = 0; i < 600 && find.text('Xem kết quả').evaluate().isEmpty; i++) {
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+}
+
 void main() {
   test('orientation được cấu hình tập trung và chỉ có landscape', () {
     expect(landscapeOnly, [
@@ -84,14 +96,81 @@ void main() {
     expect(find.text('NGÀY 3'), findsOneWidget);
   });
 
-  testWidgets('trại: các điểm chạm dẫn tới đúng màn hình', (tester) async {
-    await boot(tester, newGame: true);
-    await tapText(tester, 'Bảng nhiệm vụ');
-    expect(find.text('BẢNG NHIỆM VỤ CỦA NHÀ VUA'), findsOneWidget);
-    await tapText(tester, 'Trại');
-    await tapText(tester, 'Cổng ra bản đồ');
-    expect(find.text('Trinh sát'), findsWidgets);
-  });
+  testWidgets(
+    'trại: có thanh build / end-day / map và nhật ký dẫn tới đúng màn hình',
+    (tester) async {
+      await boot(tester, newGame: true);
+      expect(find.text('build'), findsOneWidget);
+      expect(find.text('end-day'), findsOneWidget);
+      expect(find.text('map'), findsOneWidget);
+      await tester.tap(find.byTooltip('Nhật ký (journal): nhiệm vụ đang làm'));
+      await tester.pumpAndSettle();
+      expect(find.text('BẢNG NHIỆM VỤ CỦA NHÀ VUA'), findsOneWidget);
+      await tapText(tester, 'Trại');
+      await tapText(tester, 'map');
+      expect(find.text('Trinh sát'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'trại: kéo-thả binh sĩ vào công trình gán thật (n/3), kéo sang công trình khác thì chuyển',
+    (tester) async {
+      final c = await boot(tester, newGame: true, size: const Size(1024, 768));
+      final so = c.state!.roster.first;
+      final yard = c.state!.facilities.firstWhere(
+        (f) => f.type == FacilityType.meleeYard,
+      );
+      final bow = c.state!.facilities.firstWhere(
+        (f) => f.type == FacilityType.archeryRange,
+      );
+      Finder token() => find.bySemanticsLabel('Binh sĩ ${so.name}');
+      Finder fac(FacilityType t) =>
+          find.byTooltip('${facilityDefs[t]!.name}\n${facilityDefs[t]!.blurb}');
+      expect(token(), findsOneWidget);
+      var from = tester.getCenter(token());
+      await tester.dragFrom(
+        from,
+        tester.getCenter(fac(FacilityType.meleeYard)) - from,
+      );
+      await tester.pumpAndSettle();
+      expect(yard.assigned, [so.id]);
+      expect(find.textContaining('Bãi tập cận chiến  1/3'), findsOneWidget);
+      from = tester.getCenter(token());
+      await tester.dragFrom(
+        from,
+        tester.getCenter(fac(FacilityType.archeryRange)) - from,
+      );
+      await tester.pumpAndSettle();
+      expect(yard.assigned, isEmpty);
+      expect(bow.assigned, [so.id]);
+      // Công trình tác động khi qua ngày.
+      final dex = c.state!.soldier(so.id)!.stats[Stat.dex]!;
+      await tester.tap(find.text('end-day'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(c.state!.soldier(so.id)!.train[Stat.dex], trainPercentPerDay);
+      expect(c.state!.soldier(so.id)!.stats[Stat.dex], dex);
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'trại: menu Build chọn công trình rồi đặt vào ô trống, trừ tài nguyên',
+    (tester) async {
+      final c = await boot(tester, newGame: true, size: const Size(1024, 768));
+      c.state!.res.updateAll((_, _) => 500);
+      c.endDay();
+      await tester.pumpAndSettle();
+      final n = c.state!.facilities.length;
+      await tester.tap(find.text('build'));
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Bãi bắn cung');
+      expect(find.textContaining('Chạm một ô vàng'), findsOneWidget);
+      await tester.tap(find.text('Đặt Bãi bắn cung').first);
+      await tester.pumpAndSettle();
+      expect(c.state!.facilities.length, n + 1);
+      expect(c.state!.facilities.last.type, FacilityType.archeryRange);
+    },
+  );
 
   testWidgets(
     'quản lý binh sĩ: đổi tên, trang bị có so sánh trước/sau, huấn luyện',
@@ -116,9 +195,12 @@ void main() {
       await tapText(tester, 'Trang bị');
       expect(c.state!.soldier(so.id)!.accessoryId, 'iron_ring');
 
-      final before = c.state!.soldier(so.id)!.stats[Stat.con]!;
-      await tapText(tester, 'Thể trạng $before→${before + 1}');
-      expect(c.state!.soldier(so.id)!.training, isTrue);
+      await tapText(tester, 'Bãi tập cận chiến 0/3');
+      final yard = c.state!.facilities.firstWhere(
+        (f) => f.type == FacilityType.meleeYard,
+      );
+      expect(yard.assigned, [so.id]);
+      expect(find.text('Rời công trình'), findsOneWidget);
     },
   );
 
@@ -156,12 +238,9 @@ void main() {
     c.endDay(); // thông báo UI sau khi sửa tài nguyên
     await tester.pumpAndSettle();
     await tapText(tester, 'Xây dựng');
-    final lvl = c.state!.buildings[Building.barracks]!;
+    final before = c.state!.buildings.values.fold(0, (a, b) => a + b);
     await tapText(tester, 'Nâng cấp');
-    expect(
-      c.state!.buildings.values.fold(0, (a, b) => a + b),
-      greaterThan(lvl + 2),
-    );
+    expect(c.state!.buildings.values.fold(0, (a, b) => a + b), before + 1);
   });
 
   testWidgets(
@@ -174,15 +253,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Trại cướp đường'), findsWidgets);
       await tapText(tester, 'Chuẩn bị đội hình');
-      expect(find.textContaining('Chuẩn bị đội hình •'), findsOneWidget);
+      expect(find.textContaining('Chọn đội •'), findsOneWidget);
       await tapText(tester, 'Tự chọn');
-      await tapText(tester, 'Xuất quân');
-      expect(find.text('DIỄN BIẾN'), findsOneWidget);
+      await tapText(tester, 'Tiếp tục: triển khai');
+      expect(find.text('Fight!'), findsOneWidget);
+      expect(find.text('ASSIGN_ORDERS'), findsOneWidget);
+      await tapText(tester, 'Deploy Units');
+      await tapText(tester, 'Fight!');
+      expect(find.text('NHẬT KÝ CHIẾN ĐẤU'), findsOneWidget);
       expect(
         c.state!.battlesWon + c.state!.battlesLost,
         1,
       ); // trận đã áp dụng vào state
-      await tapText(tester, 'Bỏ qua');
+      await watchBattle(tester);
       expect(find.text('Xem kết quả'), findsOneWidget);
       await tapText(tester, 'Xem kết quả');
       expect(find.text('THƯƠNG VONG VÀ KINH NGHIỆM'), findsOneWidget);
@@ -220,7 +303,7 @@ void main() {
       for (var i = 0; i < 6; i++) {
         c.state!.soldiers.add(GameRules.generateSoldier(c.state!, equip: true));
       }
-      c.state!.roster.first.injuryDays = 3;
+      c.state!.roster.first.hp = 3;
       await tester.pumpAndSettle();
       for (final tab in [
         'Binh sĩ',
@@ -242,9 +325,10 @@ void main() {
       await tester.pumpAndSettle();
       await tapText(tester, 'Chuẩn bị đội hình');
       await tapText(tester, 'Tự chọn');
-      await tapText(tester, 'Xuất quân');
-      await tester.pump(const Duration(seconds: 2));
-      await tapText(tester, 'Bỏ qua');
+      await tapText(tester, 'Tiếp tục: triển khai');
+      await tapText(tester, 'Deploy Units');
+      await tapText(tester, 'Fight!');
+      await watchBattle(tester);
       await tapText(tester, 'Xem kết quả');
       expect(tester.takeException(), isNull);
       await tapText(tester, 'Về trại');

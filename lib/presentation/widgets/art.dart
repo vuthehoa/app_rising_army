@@ -944,3 +944,195 @@ class CityPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CityPainter old) => old.stalls != stalls;
 }
+
+/// Nền trại nhìn từ trên xuống: đồng cỏ, hàng rào cọc gỗ bao quanh (theo ảnh chụp chính thức; vẽ riêng).
+class CampGroundPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = const Color(0xFF8DA24A),
+    );
+    final rng = Random(4);
+    for (var i = 0; i < 40; i++) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(rng.nextDouble() * w, rng.nextDouble() * h),
+          width: 30 + rng.nextDouble() * 50,
+          height: 10 + rng.nextDouble() * 14,
+        ),
+        Paint()..color = const Color(0xFF7E9440).withValues(alpha: 0.55),
+      );
+    }
+    // Hàng rào cọc.
+    final log = Paint()..color = const Color(0xFF8A6A3C);
+    final edge = Paint()
+      ..color = Pal.ink
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    const step = 22.0;
+    void post(Offset c, double angle) {
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.rotate(angle);
+      final r = RRect.fromRectAndCorners(
+        const Rect.fromLTWH(-8, -16, 16, 32),
+        topLeft: const Radius.circular(8),
+        topRight: const Radius.circular(8),
+      );
+      canvas.drawRRect(r, log);
+      canvas.drawRRect(r, edge);
+      canvas.restore();
+    }
+
+    for (var x = 0.0; x < w; x += step) {
+      post(Offset(x + 10, 6), 0);
+      post(Offset(x + 10, h - 6), 0);
+    }
+    for (var y = 0.0; y < h; y += step) {
+      post(Offset(6, y + 10), pi / 2);
+      post(Offset(w - 6, y + 10), pi / 2);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CampGroundPainter old) => false;
+}
+
+/// Hình công trình trong trại (vẽ riêng, mô phỏng bố cục của ảnh chính thức).
+class FacilityPainter extends CustomPainter {
+  FacilityPainter(this.type);
+  final FacilityType type;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final ink = Paint()
+      ..color = Pal.ink
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
+    final dirt = Paint()..color = const Color(0xFFD9BF86);
+    void ground() {
+      final r = Rect.fromLTWH(w * 0.04, h * 0.28, w * 0.92, h * 0.66);
+      canvas.drawOval(r, dirt);
+      canvas.drawOval(r, ink);
+    }
+
+    switch (type) {
+      case FacilityType.meleeYard:
+        ground();
+        for (var i = 0; i < 4; i++) {
+          final c = Offset(w * (0.22 + 0.19 * i), h * (i.isEven ? 0.55 : 0.72));
+          canvas.drawCircle(
+            c + Offset(0, -h * 0.1),
+            w * 0.06,
+            Paint()..color = const Color(0xFFE8D9A8),
+          );
+          canvas.drawLine(
+            c,
+            c + Offset(0, h * 0.15),
+            Paint()
+              ..color = const Color(0xFF6B4A2B)
+              ..strokeWidth = 4,
+          );
+        }
+      case FacilityType.archeryRange:
+        ground();
+        for (var i = 0; i < 3; i++) {
+          final c = Offset(w * (0.25 + 0.25 * i), h * 0.56);
+          for (final (r, col) in [
+            (w * 0.07, Colors.white),
+            (w * 0.05, Pal.blood),
+            (w * 0.025, Colors.white),
+          ]) {
+            canvas.drawCircle(c, r, Paint()..color = col);
+          }
+          canvas.drawCircle(c, w * 0.07, ink);
+        }
+      case FacilityType.enduranceYard:
+        ground();
+        for (var i = 0; i < 3; i++) {
+          final c = Offset(w * (0.28 + 0.22 * i), h * 0.64);
+          canvas.drawOval(
+            Rect.fromCenter(center: c, width: w * 0.14, height: h * 0.16),
+            Paint()..color = const Color(0xFF8A8F96),
+          );
+          canvas.drawOval(
+            Rect.fromCenter(center: c, width: w * 0.14, height: h * 0.16),
+            ink,
+          );
+        }
+      case FacilityType.infirmary:
+        final tent = Path()
+          ..moveTo(w * 0.1, h * 0.88)
+          ..lineTo(w * 0.5, h * 0.12)
+          ..lineTo(w * 0.9, h * 0.88)
+          ..close();
+        canvas.drawPath(tent, Paint()..color = const Color(0xFFEDE4CC));
+        canvas.drawPath(tent, ink);
+        final cross = Paint()
+          ..color = Pal.blood
+          ..strokeWidth = w * 0.07;
+        canvas.drawLine(
+          Offset(w * 0.5, h * 0.3),
+          Offset(w * 0.5, h * 0.58),
+          cross,
+        );
+        canvas.drawLine(
+          Offset(w * 0.36, h * 0.44),
+          Offset(w * 0.64, h * 0.44),
+          cross,
+        );
+        canvas.drawPath(
+          Path()
+            ..moveTo(w * 0.5, h * 0.55)
+            ..lineTo(w * 0.38, h * 0.88)
+            ..lineTo(w * 0.62, h * 0.88)
+            ..close(),
+          Paint()..color = Pal.ink,
+        );
+      case FacilityType.campfire:
+        canvas.drawOval(
+          Rect.fromLTWH(w * 0.1, h * 0.55, w * 0.8, h * 0.36),
+          dirt,
+        );
+        canvas.drawOval(
+          Rect.fromLTWH(w * 0.1, h * 0.55, w * 0.8, h * 0.36),
+          ink,
+        );
+        for (final dx in [-0.18, 0.0, 0.18]) {
+          canvas.drawLine(
+            Offset(w * (0.5 + dx), h * 0.78),
+            Offset(w * 0.5, h * 0.38),
+            Paint()
+              ..color = const Color(0xFF6B4A2B)
+              ..strokeWidth = 5,
+          );
+        }
+        canvas.drawPath(
+          Path()
+            ..moveTo(w * 0.42, h * 0.74)
+            ..quadraticBezierTo(w * 0.5, h * 0.3, w * 0.58, h * 0.74)
+            ..close(),
+          Paint()..color = const Color(0xFFFFA43A),
+        );
+        canvas.drawCircle(
+          Offset(w * 0.5, h * 0.68),
+          w * 0.05,
+          Paint()..color = const Color(0xFFFFE08A),
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(w * 0.12, h * 0.55, w * 0.1, h * 0.2),
+          Paint()..color = const Color(0xFF8A6A3C),
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(w * 0.78, h * 0.55, w * 0.1, h * 0.2),
+          Paint()..color = const Color(0xFF8A6A3C),
+        );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant FacilityPainter old) => old.type != type;
+}

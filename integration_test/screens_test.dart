@@ -32,7 +32,7 @@ void main() {
     for (var i = 0; i < 4; i++) {
       s.soldiers.add(GameRules.generateSoldier(s, equip: true));
     }
-    s.roster[1].injuryDays = 3;
+    s.roster[1].hp = 8;
     c.endDay();
     await shot('02_camp');
     await tapText(t, 'Binh sĩ');
@@ -56,10 +56,20 @@ void main() {
     await tapText(t, 'Chuẩn bị đội hình');
     await tapText(t, 'Tự chọn');
     await shot('09_squad');
-    await tapText(t, 'Xuất quân');
+    await tapText(t, 'Tiếp tục: triển khai');
+    await shot('09b_deploy_empty');
+    await tapText(t, 'Deploy Units');
+    await shot('09c_deploy_placed');
+    await tapText(t, 'Fight!');
     await t.pump(const Duration(seconds: 5));
     await shot('10_battle_playing');
-    await tapText(t, 'Bỏ qua');
+    for (
+      var i = 0;
+      i < 120 && find.text('Xem kết quả').evaluate().isEmpty;
+      i++
+    ) {
+      await t.pump(const Duration(milliseconds: 500));
+    }
     await shot('11_battle_done');
     await tapText(t, 'Xem kết quả');
     await shot('12_result');

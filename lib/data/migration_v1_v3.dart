@@ -2,13 +2,13 @@ import '../domain/catalog.dart';
 import '../domain/models.dart';
 import '../domain/rules.dart';
 
-/// Chuyển save v1 (quân theo số lượng) sang v2 (từng binh sĩ).
+/// Chuyển save v1 (quân theo số lượng) sang định dạng hiện hành (v3, từng binh sĩ có HP và công trình trong trại).
 /// - Mỗi đơn vị cũ (kể cả đang huấn luyện) thành một binh sĩ có id riêng, gắn trang bị cấp 1.
 /// - Công nghệ cũ cộng chỉ số cho binh sĩ; Canh nông đổi thành lương thực một lần.
 /// - Công trình sản xuất cũ không còn tồn tại: phần nâng cấp được hoàn thành đồng xu.
 /// - Toàn bộ save v1 gốc được giữ trong trường `legacy` để không mất dữ liệu.
 /// Ném [FormatException] nếu dữ liệu v1 thiếu hoặc vô lý (khi đó repository giữ nguyên save gốc).
-Map<String, dynamic> migrateV1toV2(Map<String, dynamic> v1) {
+Map<String, dynamic> migrateV1toV3(Map<String, dynamic> v1) {
   Map<String, dynamic> map(String key) {
     final v = v1[key];
     if (v is! Map) throw FormatException('Save v1 thiếu "$key"');
@@ -94,7 +94,18 @@ Map<String, dynamic> migrateV1toV2(Map<String, dynamic> v1) {
   int b(String k) => count(buildings, k, max: 5);
   s.buildings[Building.barracks] = b('barracks').clamp(1, 3);
   s.buildings[Building.smithy] = b('smithy').clamp(1, 3);
-  s.buildings[Building.trainingGround] = b('academy') > 0 ? 2 : 1;
+  if (b('academy') > 0) {
+    // Học viện cũ → thêm một công trình huấn luyện thể lực (không tốn tài nguyên).
+    final pos = GameRules.facilitySlots[GameRules.freeSlotIndices(s).first];
+    s.facilities.add(
+      Facility(
+        id: s.nextFacilityId++,
+        type: FacilityType.enduranceYard,
+        x: pos.$1,
+        y: pos.$2,
+      ),
+    );
+  }
   final surplus = b('farm') + b('lumberCamp') + b('mine') + b('market') - 3;
   if (surplus > 0) s.res[Res.coins] = s.res[Res.coins]! + 40 * surplus;
 

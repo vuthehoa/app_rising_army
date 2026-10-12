@@ -486,7 +486,13 @@ class _VendorScreenState extends State<VendorScreen> {
                         after.reduction * 100,
                         suffix: '%',
                       ),
-                      cmp('Tốc độ', before.speed, after.speed),
+                      cmp(
+                        'Tốc độ',
+                        before.speed,
+                        after.speed,
+                        digits: 1,
+                        suffix: ' m/s',
+                      ),
                       cmp(
                         'Chính xác',
                         before.accuracy * 100,

@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../domain/models.dart';
-import 'migration_v1_v2.dart';
+import 'migration_v1_v3.dart';
+import 'migration_v2_v3.dart';
 
 abstract class KeyValueStore {
   Future<String?> read(String key);
@@ -57,6 +58,13 @@ class LoadResult {
 
 typedef Migration = Map<String, dynamic> Function(Map<String, dynamic> data);
 
+/// Một bước migration: chạy [run] rồi dữ liệu có phiên bản [to] (có thể nhảy cóc, ví dụ v1 → v3).
+class MigrationStep {
+  const MigrationStep(this.to, this.run);
+  final int to;
+  final Migration run;
+}
+
 class _Decoded {
   const _Decoded({
     this.state,
@@ -74,9 +82,17 @@ class SaveRepository {
     this._store, {
     Map<int, Migration>? migrations,
     this.currentVersion = latestVersion,
-  }) : _migrations = migrations ?? {1: migrateV1toV2};
+  }) : _steps = migrations == null
+           ? const {
+               1: MigrationStep(3, migrateV1toV3),
+               2: MigrationStep(3, migrateV2toV3),
+             }
+           : {
+               for (final e in migrations.entries)
+                 e.key: MigrationStep(e.key + 1, e.value),
+             };
 
-  static const latestVersion = 2;
+  static const latestVersion = 3;
   static const primaryKey = 'save_primary';
   static const backupKey = 'save_backup';
   static String archiveKey(int version) => 'save_archive_v$version';
@@ -84,8 +100,8 @@ class SaveRepository {
   final int currentVersion;
   final KeyValueStore _store;
 
-  /// migrations[n] nâng dữ liệu từ phiên bản n lên n+1.
-  final Map<int, Migration> _migrations;
+  /// Bước nâng cấp theo phiên bản nguồn.
+  final Map<int, MigrationStep> _steps;
 
   static String checksum(String text) {
     var h = 0x811c9dc5;
@@ -181,14 +197,16 @@ class SaveRepository {
       var map = Map<String, dynamic>.from(jsonDecode(data) as Map);
       final from = version;
       while (version < currentVersion) {
-        final m = _migrations[version];
-        if (m == null) return const _Decoded(migrationFailed: true);
+        final step = _steps[version];
+        if (step == null || step.to <= version || step.to > currentVersion) {
+          return const _Decoded(migrationFailed: true);
+        }
         try {
-          map = m(map);
+          map = step.run(map);
         } catch (_) {
           return const _Decoded(migrationFailed: true);
         }
-        version++;
+        version = step.to;
       }
       return _Decoded(
         state: GameState.fromJson(map),
