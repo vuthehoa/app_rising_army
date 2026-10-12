@@ -9,6 +9,7 @@ import '../../domain/models.dart';
 import '../../domain/rules.dart';
 import '../../domain/stats.dart';
 import '../widgets/art.dart';
+import '../widgets/buildings/buildings.dart';
 import '../widgets/common.dart';
 import 'shell.dart';
 
@@ -160,7 +161,7 @@ class _CampHubState extends State<CampHub> {
                     onTap: () => ShellNav.of(context).go(Sections.missions),
                   ),
                 ),
-                // Thanh dưới: build / end-day / map.
+                // Thanh dưới: build / map.
                 Positioned(
                   left: 0,
                   right: 0,
@@ -185,27 +186,6 @@ class _CampHubState extends State<CampHub> {
                             onTap: () => _placing == null
                                 ? _openBuild(context, s)
                                 : setState(() => _placing = null),
-                          ),
-                          const SizedBox(width: 6),
-                          _BarButton(
-                            icon: Icons.nightlight_round,
-                            label: 'end-day',
-                            primary: true,
-                            onTap: () {
-                              final r = c.endDay();
-                              showSnack(
-                                context,
-                                [
-                                  'Bổng lộc nhà vua: ${GameRules.describeCost(r.stipend)}',
-                                  'Trả công: ${r.upkeep} thức ăn + ${r.upkeep} đồng xu',
-                                  ...r.lines,
-                                ].join('\n'),
-                                color: r.paid
-                                    ? Pal.panelHi
-                                    : const Color(0xFF4A2019),
-                                duration: const Duration(seconds: 5),
-                              );
-                            },
                           ),
                           const SizedBox(width: 6),
                           _BarButton(
@@ -297,9 +277,7 @@ class _CampHubState extends State<CampHub> {
                                 leading: SizedBox(
                                   width: 64,
                                   height: 44,
-                                  child: CustomPaint(
-                                    painter: FacilityPainter(t),
-                                  ),
+                                  child: FacilityArt(t),
                                 ),
                                 title: Text(
                                   def.name,
@@ -387,13 +365,11 @@ class _BarButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
-    this.primary = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool primary;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -406,7 +382,7 @@ class _BarButton extends StatelessWidget {
         constraints: const BoxConstraints(minHeight: 40, minWidth: 80),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: primary ? Pal.gold : const Color(0xFFE9C985),
+          color: const Color(0xFFE9C985),
           borderRadius: BorderRadius.circular(22),
           border: Border.all(color: Pal.ink, width: 2),
         ),
@@ -455,9 +431,7 @@ class _FacilityView extends StatelessWidget {
           message: '${def.name}\n${def.blurb}',
           child: Stack(
             children: [
-              Positioned.fill(
-                child: CustomPaint(painter: FacilityPainter(facility.type)),
-              ),
+              Positioned.fill(child: FacilityArt(facility.type)),
               if (hot)
                 Positioned.fill(
                   child: DecoratedBox(

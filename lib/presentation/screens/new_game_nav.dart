@@ -20,6 +20,7 @@ class NewGameNav {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (ctx) => NewGameScreen(
+          initialName: flow.draft.displayName,
           onBack: () => Navigator.of(ctx).pop(),
           onStartGame: (data) {
             flow.update((d) => d.copyWith(displayName: data.characterName));

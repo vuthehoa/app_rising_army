@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
+import 'package:app_rising_army/data/name_generator.dart';
 import 'package:app_rising_army/data/new_game_data.dart';
+import 'package:app_rising_army/domain/identity.dart' show maxDisplayNameLength;
 import 'package:app_rising_army/data/skin_color.dart';
 import 'package:app_rising_army/presentation/widgets/avatar/avatar_widget.dart';
 import 'package:app_rising_army/presentation/widgets/avatar/background_painter.dart';
@@ -9,7 +11,15 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 
 class NewGameScreen extends StatefulWidget {
-  const NewGameScreen({super.key, this.onStartGame, this.onBack});
+  const NewGameScreen({
+    super.key,
+    this.onStartGame,
+    this.onBack,
+    this.initialName,
+  });
+
+  /// Tên nháp khôi phục khi có (ví dụ từ bước trước); null/rỗng thì tự sinh tên ngẫu nhiên.
+  final String? initialName;
 
   final ValueChanged<NewGameData>? onStartGame;
   final VoidCallback? onBack;
@@ -37,6 +47,32 @@ class _NewGameScreenState extends State<NewGameScreen> {
 
   static const _skinColors = AvatarColorPalette.skinColors;
   static const _skinNames = AvatarColorPalette.skinNames;
+
+  @override
+  void initState() {
+    super.initState();
+    // Chỉ chạy một lần cho mỗi lượt tạo nhân vật; rebuild/quay lại không đụng tới.
+    final draft = NameGenerator.normalize(widget.initialName ?? '');
+    _setName(
+      draft.length >= 2 ? draft : NameGenerator.generate(_gender, _random),
+    );
+  }
+
+  /// Controller là nguồn tên duy nhất: _startGame đọc lại từ đây.
+  void _setName(String name) {
+    _nameController.value = TextEditingValue(
+      text: name,
+      selection: TextSelection.collapsed(offset: name.length),
+    );
+  }
+
+  void _randomizeName() {
+    setState(() {
+      _setName(
+        NameGenerator.generate(_gender, _random, avoid: _nameController.text),
+      );
+    });
+  }
 
   @override
   void dispose() {
@@ -517,7 +553,7 @@ class _NewGameScreenState extends State<NewGameScreen> {
           height: 44,
           child: TextField(
             controller: _nameController,
-            maxLength: 30,
+            maxLength: maxDisplayNameLength,
             textCapitalization: TextCapitalization.words,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _startGame(),
@@ -533,6 +569,16 @@ class _NewGameScreenState extends State<NewGameScreen> {
                 fontSize: 12,
               ),
               counterText: '',
+              suffixIcon: IconButton(
+                key: const ValueKey('randomize-name'),
+                tooltip: 'Tên ngẫu nhiên',
+                icon: const Icon(
+                  Icons.casino_rounded,
+                  color: Pal.gold,
+                  size: 19,
+                ),
+                onPressed: _randomizeName,
+              ),
               filled: true,
               fillColor: Pal.panel,
               contentPadding: const EdgeInsets.symmetric(

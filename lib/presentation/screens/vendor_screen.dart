@@ -308,7 +308,8 @@ class _VendorScreenState extends State<VendorScreen> {
     GameState s,
     ActionResult Function() action,
   ) async {
-    if (_buy && total >= 100 || _buy && total * 2 > s.res[Res.coins]!) {
+    if (_buy && total >= 100 ||
+        _buy && total * 2 > GameRules.spendableCoins(s)) {
       final ok = await confirm(
         context,
         'Xác nhận mua',
@@ -342,7 +343,7 @@ class _VendorScreenState extends State<VendorScreen> {
         ? [
             stock,
             capLeft,
-            s.res[Res.coins]! ~/ unit,
+            GameRules.spendableCoins(s) ~/ unit,
           ].reduce((a, b) => a < b ? a : b)
         : owned;
     final qty = _qty.clamp(1, maxQty < 1 ? 1 : maxQty);
@@ -368,7 +369,7 @@ class _VendorScreenState extends State<VendorScreen> {
         lock = 'Hết hàng';
       } else if (capLeft <= 0) {
         lock = 'Kho đồ đầy';
-      } else if (s.res[Res.coins]! < unit) {
+      } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
         lock = 'Thiếu ${unit - s.res[Res.coins]!} đồng xu';
       }
     } else if (owned <= 0) {
@@ -571,7 +572,10 @@ class _VendorScreenState extends State<VendorScreen> {
     final stock = st.resources[r] ?? 0;
     final owned = s.res[r]! ~/ resourceLotSize;
     final maxQty = _buy
-        ? [stock, s.res[Res.coins]! ~/ unit].reduce((a, b) => a < b ? a : b)
+        ? [
+            stock,
+            GameRules.spendableCoins(s) ~/ unit,
+          ].reduce((a, b) => a < b ? a : b)
         : owned;
     final qty = _qty.clamp(1, maxQty < 1 ? 1 : maxQty);
     final total = unit * qty;
@@ -579,7 +583,7 @@ class _VendorScreenState extends State<VendorScreen> {
     if (_buy) {
       if (stock <= 0) {
         lock = 'Hết hàng';
-      } else if (s.res[Res.coins]! < unit) {
+      } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
         lock = 'Thiếu ${unit - s.res[Res.coins]!} đồng xu';
       }
     } else if (owned <= 0) {

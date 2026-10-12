@@ -1,4 +1,7 @@
 import 'dart:convert';
+
+import 'support/built_camp.dart';
+
 import 'dart:math';
 
 import 'package:app_rising_army/data/migration_v1_v3.dart';
@@ -10,7 +13,7 @@ import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/domain/stats.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-GameState fresh([int seed = 7]) => GameRules.newGame(seed: seed);
+GameState fresh([int seed = 7]) => newGameWithBuiltCamp(seed: seed);
 
 Soldier mk(GameState s, Role r, {int level = 1, bool equip = true}) {
   final so = GameRules.generateSoldier(s, role: r, level: level, equip: equip);
@@ -200,15 +203,11 @@ void main() {
     Facility fac(GameState s, FacilityType t) =>
         s.facilities.firstWhere((f) => f.type == t);
 
-    test('ván mới có công trình đầu game: bãi cận chiến, bãi bắn cung, lều cứu thương, bếp lửa', () {
-      final s = fresh();
-      expect(s.facilities.map((f) => f.type).toSet(), {
-        FacilityType.meleeYard,
-        FacilityType.archeryRange,
-        FacilityType.infirmary,
-        FacilityType.campfire,
-      });
-      expect(s.facilities.every((f) => f.assigned.isEmpty), isTrue);
+    test('ván mới chỉ có bếp lửa trại; mọi công trình khác chưa xây', () {
+      final s = GameRules.newGame(seed: 7);
+      expect(s.facilities.map((f) => f.type), [FacilityType.campfire]);
+      expect(s.facilities.single.assigned, isEmpty);
+      expect(s.buildings.values.every((l) => l == 0), isTrue);
     });
 
     test('gán binh sĩ vào công trình: sức chứa 3, tự rút khỏi công trình cũ, bếp lửa không nhận gán', () {
@@ -1172,7 +1171,7 @@ void main() {
     test('150 ván x 150 hành động: không âm, id duy nhất, chết là vĩnh viễn, save round-trip', () async {
       for (var seed = 0; seed < 150; seed++) {
         final rng = Random(seed);
-        final s = GameRules.newGame(seed: seed);
+        final s = newGameWithBuiltCamp(seed: seed);
         final deadEver = <int>{};
         for (var step = 0; step < 150 && !s.gameOver && !s.victory; step++) {
           final roster = s.roster;
@@ -1495,7 +1494,7 @@ void balanceGuarantees() {
     }) {
       var wins = 0;
       for (var seed = 0; seed < n; seed++) {
-        final s = GameRules.newGame(seed: seed);
+        final s = newGameWithBuiltCamp(seed: seed);
         final squad = <Soldier>[];
         for (var i = 0; i < size; i++) {
           final r = Role.values[i % 3];
@@ -1550,7 +1549,7 @@ void balanceGuarantees() {
     test('ải đầu là hướng dẫn: 6 lính khởi đầu thắng 100% trại cướp đường', () {
       var wins = 0;
       for (var seed = 0; seed < 300; seed++) {
-        final s = GameRules.newGame(seed: seed);
+        final s = newGameWithBuiltCamp(seed: seed);
         final rep = GameRules.fight(s, s.roster, {
           for (final x in s.roster)
             if (x.role != Role.archer) x.id,

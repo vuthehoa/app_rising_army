@@ -268,7 +268,9 @@ class CostText extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: state.res[e.key]! >= e.value ? Pal.text : Pal.blood,
+                color: GameRules.canAfford(state, {e.key: e.value})
+                    ? Pal.text
+                    : Pal.blood,
               ),
             ),
           ],

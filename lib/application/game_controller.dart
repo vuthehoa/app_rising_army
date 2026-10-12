@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/save_repository.dart';
 import '../domain/battle.dart';
+import '../domain/dev_mode.dart';
 import '../domain/identity.dart';
 import '../domain/map_anchor.dart';
 import '../domain/models.dart';
@@ -36,6 +37,17 @@ class GameController extends ChangeNotifier {
   bool freshGame = false;
 
   GameState? get state => _state;
+
+  /// Develop Mode: miễn chi phí tài nguyên (chỉ debug). Không phải tiến trình: không vào save,
+  /// không đổi GameState; chỉ báo UI dựng lại. Xem [DevMode].
+  bool get devMode => DevMode.enabled;
+
+  void setDevMode(bool value) {
+    if (DevMode.enabled == value || !DevMode.available) return;
+    DevMode.enabled = value;
+    notifyListeners();
+  }
+
   bool get hasSave => _pendingSave != null;
 
   /// Danh tính của ván đang chơi (null khi đang ở menu).
@@ -148,6 +160,8 @@ class GameController extends ChangeNotifier {
       _apply(() => GameRules.sellResourceLots(_state!, vendor, res, lots));
   ActionResult leaveCity() => _apply(() => GameRules.leaveCity(_state!));
 
+  /// Logic qua ngày (lương, huấn luyện, hồi phục, sự kiện). KHÔNG còn được UI gọi: người chơi không
+  /// có thao tác kết thúc ngày. Giữ lại cho mô phỏng/test và để hệ thống thời gian không mất.
   DayReport endDay() {
     final r = GameRules.tickDay(_state!);
     lastDayReport = r;

@@ -3,10 +3,9 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
-import '../../domain/rules.dart';
 import 'common.dart';
 
-/// HUD ngang mảnh: ngày, tài nguyên, tinh thần, hài lòng nhà vua, kết thúc ngày.
+/// HUD ngang mảnh: ngày, tài nguyên, tinh thần, hài lòng nhà vua.
 class Hud extends StatelessWidget {
   const Hud({super.key, required this.onMenu});
 
@@ -117,12 +116,6 @@ class Hud extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          GameButton(
-            label: d.compact ? 'Ngày' : 'Kết thúc ngày',
-            icon: Icons.nightlight_round,
-            dense: true,
-            onPressed: () => _endDay(context, c),
-          ),
           IconButton(
             visualDensity: VisualDensity.compact,
             tooltip: 'Menu',
@@ -131,21 +124,6 @@ class Hud extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-
-  void _endDay(BuildContext context, dynamic c) {
-    final DayReport r = c.endDay();
-    final lines = [
-      'Bổng lộc nhà vua: ${GameRules.describeCost(r.stipend)}',
-      'Trả lương: ${r.upkeep} lương thực + ${r.upkeep} đồng xu',
-      ...r.lines,
-    ];
-    showSnack(
-      context,
-      lines.join('\n'),
-      color: r.paid ? Pal.panelHi : const Color(0xFF4A2019),
-      duration: const Duration(seconds: 5),
     );
   }
 }

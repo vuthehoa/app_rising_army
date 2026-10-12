@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'battle.dart';
 import 'catalog.dart';
+import 'dev_mode.dart';
 import 'identity.dart';
 import 'models.dart';
 import 'stats.dart';
@@ -114,18 +115,12 @@ class GameRules {
       res: {Res.food: 80, Res.coins: 120, Res.wood: 40, Res.iron: 20},
       soldiers: [],
       nextSoldierId: 1,
-      buildings: {
-        for (final b in Building.values) b: 0,
-        Building.barracks: 1,
-        Building.smithy: 1,
-      },
+      // Mọi công trình đều phải được xây (cấp 0 = chưa xây); chỉ bếp lửa trại có sẵn.
+      buildings: {for (final b in Building.values) b: 0},
       facilities: [
-        Facility(id: 1, type: FacilityType.meleeYard, x: 0.27, y: 0.4),
-        Facility(id: 2, type: FacilityType.archeryRange, x: 0.5, y: 0.3),
-        Facility(id: 3, type: FacilityType.infirmary, x: 0.76, y: 0.4),
-        Facility(id: 4, type: FacilityType.campfire, x: 0.5, y: 0.64),
+        Facility(id: 1, type: FacilityType.campfire, x: 0.5, y: 0.64),
       ],
-      nextFacilityId: 5,
+      nextFacilityId: 2,
       inventory: {'padded_armor': 1, 'iron_ring': 1, 'lucky_charm': 1},
       candidates: [],
       missions: [],
@@ -159,8 +154,14 @@ class GameRules {
 
   // ---------- Tài nguyên ----------
 
+  /// Đủ tài nguyên để trả [c]? Luôn true khi Develop Mode miễn chi phí.
   static bool canAfford(GameState s, Cost c) =>
+      DevMode.freeResources ||
       c.entries.every((e) => (s.res[e.key] ?? 0) >= e.value);
+
+  /// Số đồng xu có thể chi: vô hạn (giá trị rất lớn) khi Develop Mode bật.
+  static int spendableCoins(GameState s) =>
+      DevMode.freeResources ? 1 << 30 : s.res[Res.coins]!;
 
   /// Chỉ dùng cho công cụ mô phỏng: sổ thu/chi tích lũy. Null trong game thật.
   static Map<Res, int>? ledgerIn;
@@ -169,7 +170,14 @@ class GameRules {
   /// Chỉ dùng cho mô phỏng: gọi sau mỗi lần qua ngày.
   static void Function(GameState s)? dayHook;
 
+  /// Trả chi phí [c]. Không làm gì khi Develop Mode miễn chi phí.
+  /// Dùng cho CHI PHÍ; việc giao ra tài nguyên thật (bán hàng) dùng [_deduct].
   static void spend(GameState s, Cost c) {
+    if (DevMode.freeResources) return;
+    _deduct(s, c);
+  }
+
+  static void _deduct(GameState s, Cost c) {
     for (final e in c.entries) {
       s.res[e.key] = s.res[e.key]! - e.value;
       if (ledgerOut != null) {
@@ -721,7 +729,7 @@ class GameRules {
       );
     }
     final gain = resourceSellPrice(res) * lots;
-    spend(s, {res: units});
+    _deduct(s, {res: units});
     final st = stockOf(s, v);
     st.resources[res] = (st.resources[res] ?? 0) + lots;
     grant(s, {Res.coins: gain});

@@ -102,7 +102,9 @@ class BuildingsScreen extends StatelessWidget {
                       label: '$price',
                       icon: Icons.paid,
                       dense: true,
-                      lockedReason: s.res[Res.coins]! >= price ? null : '',
+                      lockedReason: GameRules.canAfford(s, {Res.coins: price})
+                          ? null
+                          : '',
                       onPressed: () => toast(context, c.buy(it.id)),
                     ),
                   ),

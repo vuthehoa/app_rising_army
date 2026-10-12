@@ -66,6 +66,13 @@ class _GameShellState extends State<GameShell> {
     final s = c.state!;
     final d = Dims(context);
     final railW = d.compact ? 58.0 : 72.0;
+    // App Shell (thanh điều hướng mọi mục) chỉ có khi Develop Mode bật. Bình thường, Tuyển mộ và
+    // Xây dựng không có đường vào nên không thể đang mở: quay về Trại.
+    final showRail = c.devMode;
+    final index =
+        (!showRail && (_index == Sections.recruit || _index == Sections.build))
+        ? Sections.camp
+        : _index;
     return ShellNav(
       go: (i) => setState(() => _index = i),
       child: Scaffold(
@@ -74,60 +81,64 @@ class _GameShellState extends State<GameShell> {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: railW,
-                    decoration: const BoxDecoration(
-                      color: Pal.panel,
-                      border: Border(
-                        right: BorderSide(color: Pal.line, width: 2),
+                  if (showRail)
+                    Container(
+                      key: const ValueKey('app-shell-rail'),
+                      width: railW,
+                      decoration: const BoxDecoration(
+                        color: Pal.panel,
+                        border: Border(
+                          right: BorderSide(color: Pal.line, width: 2),
+                        ),
                       ),
-                    ),
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
-                        for (var i = 0; i < _items.length; i++)
-                          InkWell(
-                            onTap: () => setState(() => _index = i),
-                            child: Container(
-                              height: d.compact ? 52 : 62,
-                              decoration: BoxDecoration(
-                                color: i == _index ? Pal.panelHi : null,
-                                border: Border(
-                                  left: BorderSide(
-                                    color: i == _index
-                                        ? Pal.gold
-                                        : Colors.transparent,
-                                    width: 3,
-                                  ),
-                                ),
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    _items[i].$1,
-                                    size: d.compact ? 20 : 24,
-                                    color: i == _index ? Pal.gold : Pal.dim,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      _items[i].$2,
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: i == _index ? Pal.gold : Pal.dim,
-                                      ),
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          for (var i = 0; i < _items.length; i++)
+                            InkWell(
+                              onTap: () => setState(() => _index = i),
+                              child: Container(
+                                height: d.compact ? 52 : 62,
+                                decoration: BoxDecoration(
+                                  color: i == _index ? Pal.panelHi : null,
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: i == _index
+                                          ? Pal.gold
+                                          : Colors.transparent,
+                                      width: 3,
                                     ),
                                   ),
-                                ],
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      _items[i].$1,
+                                      size: d.compact ? 20 : 24,
+                                      color: i == _index ? Pal.gold : Pal.dim,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        _items[i].$2,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: i == _index
+                                              ? Pal.gold
+                                              : Pal.dim,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                   Expanded(
                     child: Column(
                       children: [
@@ -144,7 +155,7 @@ class _GameShellState extends State<GameShell> {
                           ),
                         Expanded(
                           child: IndexedStack(
-                            index: _index,
+                            index: index,
                             children: const [
                               CampHub(),
                               RosterScreen(),

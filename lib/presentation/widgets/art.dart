@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
+import 'buildings/buildings.dart';
 
 /// Toàn bộ hình ảnh được vẽ bằng code (CustomPainter): không dùng asset ngoài, không vướng giấy phép.
 /// Đây là bộ asset nhất quán ở mức nguyên mẫu, chưa phải minh họa hoàn thiện.
@@ -540,166 +541,21 @@ class CampPainter extends CustomPainter {
       h * 0.12,
       _w / 22,
     ); // đơn vị kích thước, co theo chiều rộng khi khung hẹp
-    final dark = Paint()..color = Pal.ink;
     switch (b) {
       case BuildingSpot.barracks:
-      case BuildingSpot.infirmary:
-        final c = b == BuildingSpot.infirmary
-            ? const Color(0xFFE6DCC4)
-            : const Color(0xFF8E4B3A);
-        final tent = Path()
-          ..moveTo(p.dx - u * 1.2, p.dy + u * 0.5)
-          ..lineTo(p.dx, p.dy - u * 1.3)
-          ..lineTo(p.dx + u * 1.2, p.dy + u * 0.5)
-          ..close();
-        canvas.drawPath(tent, Paint()..color = c);
-        canvas.drawPath(
-          tent,
-          Paint()
-            ..color = Pal.ink
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(p.dx, p.dy - u * 0.3)
-            ..lineTo(p.dx - u * 0.35, p.dy + u * 0.5)
-            ..lineTo(p.dx + u * 0.35, p.dy + u * 0.5)
-            ..close(),
-          dark,
-        );
-        if (b == BuildingSpot.infirmary) {
-          final cross = Paint()
-            ..color = const Color(0xFFB5483A)
-            ..strokeWidth = u * 0.22;
-          canvas.drawLine(
-            Offset(p.dx, p.dy - u * 1.0),
-            Offset(p.dx, p.dy - u * 0.45),
-            cross,
-          );
-          canvas.drawLine(
-            Offset(p.dx - u * 0.28, p.dy - u * 0.72),
-            Offset(p.dx + u * 0.28, p.dy - u * 0.72),
-            cross,
-          );
-        }
+        paintBarracksScene(canvas, p, u);
       case BuildingSpot.trainingGround:
-        canvas.drawLine(
-          Offset(p.dx, p.dy + u * 0.5),
-          Offset(p.dx, p.dy - u * 0.6),
-          Paint()
-            ..color = const Color(0xFF6B4A2B)
-            ..strokeWidth = u * 0.18,
-        );
-        canvas.drawLine(
-          Offset(p.dx - u * 0.5, p.dy - u * 0.3),
-          Offset(p.dx + u * 0.5, p.dy - u * 0.3),
-          Paint()
-            ..color = const Color(0xFF6B4A2B)
-            ..strokeWidth = u * 0.14,
-        );
-        canvas.drawCircle(
-          Offset(p.dx, p.dy - u * 0.85),
-          u * 0.28,
-          Paint()..color = const Color(0xFFC9A66B),
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(p.dx - u * 1.0, p.dy + u * 0.45, u * 2.0, u * 0.1),
-          Paint()..color = const Color(0xFF5B4630),
-        );
+        paintTrainingGroundScene(canvas, p, u);
+      case BuildingSpot.infirmary:
+        paintInfirmaryScene(canvas, p, u);
       case BuildingSpot.smithy:
-        final hut = Rect.fromLTWH(
-          p.dx - u * 1.1,
-          p.dy - u * 0.5,
-          u * 2.2,
-          u * 1.0,
-        );
-        canvas.drawRect(hut, Paint()..color = const Color(0xFF55402A));
-        canvas.drawPath(
-          Path()
-            ..moveTo(hut.left - u * 0.2, hut.top)
-            ..lineTo(hut.center.dx, hut.top - u * 0.8)
-            ..lineTo(hut.right + u * 0.2, hut.top)
-            ..close(),
-          Paint()..color = const Color(0xFF3A2A1A),
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(p.dx - u * 0.9, p.dy + u * 0.1, u * 0.6, u * 0.22),
-          Paint()..color = const Color(0xFF9AA5AC),
-        );
-        canvas.drawCircle(
-          Offset(p.dx + u * 0.5, p.dy + u * 0.1),
-          u * 0.2,
-          Paint()..color = const Color(0xFFFF7A2B),
-        );
+        paintSmithyScene(canvas, p, u);
       case BuildingSpot.tavern:
-        final hut = Rect.fromLTWH(
-          p.dx - u * 1.1,
-          p.dy - u * 0.6,
-          u * 2.2,
-          u * 1.1,
-        );
-        canvas.drawRect(hut, Paint()..color = const Color(0xFF6B4A2B));
-        canvas.drawPath(
-          Path()
-            ..moveTo(hut.left - u * 0.25, hut.top)
-            ..lineTo(hut.center.dx, hut.top - u * 0.9)
-            ..lineTo(hut.right + u * 0.25, hut.top)
-            ..close(),
-          Paint()..color = const Color(0xFF8A3A2A),
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(p.dx - u * 0.2, p.dy - u * 0.05, u * 0.4, u * 0.55),
-          dark,
-        );
-        canvas.drawCircle(
-          Offset(p.dx + u * 0.75, p.dy - u * 0.1),
-          u * 0.18,
-          Paint()..color = Pal.gold,
-        );
+        paintTavernScene(canvas, p, u);
       case BuildingSpot.board:
-        canvas.drawLine(
-          Offset(p.dx - u * 0.5, p.dy + u * 0.3),
-          Offset(p.dx - u * 0.5, p.dy - u * 0.5),
-          Paint()
-            ..color = const Color(0xFF6B4A2B)
-            ..strokeWidth = u * 0.13,
-        );
-        canvas.drawLine(
-          Offset(p.dx + u * 0.5, p.dy + u * 0.3),
-          Offset(p.dx + u * 0.5, p.dy - u * 0.5),
-          Paint()
-            ..color = const Color(0xFF6B4A2B)
-            ..strokeWidth = u * 0.13,
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(p.dx - u * 0.6, p.dy - u * 0.55, u * 1.2, u * 0.7),
-          Paint()..color = Pal.parchment,
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(p.dx - u * 0.6, p.dy - u * 0.55, u * 1.2, u * 0.7),
-          Paint()
-            ..color = Pal.ink
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5,
-        );
+        paintBoardScene(canvas, p, u);
       case BuildingSpot.gate:
-        final pole = Paint()
-          ..color = const Color(0xFF6B4A2B)
-          ..strokeWidth = u * 0.14;
-        canvas.drawLine(
-          Offset(p.dx, p.dy + u * 0.4),
-          Offset(p.dx, p.dy - u * 1.4),
-          pole,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(p.dx, p.dy - u * 1.4)
-            ..lineTo(p.dx - u * 0.9, p.dy - u * 1.1)
-            ..lineTo(p.dx, p.dy - u * 0.8)
-            ..close(),
-          Paint()..color = Pal.blood,
-        );
+        paintGateScene(canvas, p, u);
     }
   }
 
@@ -998,141 +854,4 @@ class CampGroundPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CampGroundPainter old) => false;
-}
-
-/// Hình công trình trong trại (vẽ riêng, mô phỏng bố cục của ảnh chính thức).
-class FacilityPainter extends CustomPainter {
-  FacilityPainter(this.type);
-  final FacilityType type;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    final ink = Paint()
-      ..color = Pal.ink
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6;
-    final dirt = Paint()..color = const Color(0xFFD9BF86);
-    void ground() {
-      final r = Rect.fromLTWH(w * 0.04, h * 0.28, w * 0.92, h * 0.66);
-      canvas.drawOval(r, dirt);
-      canvas.drawOval(r, ink);
-    }
-
-    switch (type) {
-      case FacilityType.meleeYard:
-        ground();
-        for (var i = 0; i < 4; i++) {
-          final c = Offset(w * (0.22 + 0.19 * i), h * (i.isEven ? 0.55 : 0.72));
-          canvas.drawCircle(
-            c + Offset(0, -h * 0.1),
-            w * 0.06,
-            Paint()..color = const Color(0xFFE8D9A8),
-          );
-          canvas.drawLine(
-            c,
-            c + Offset(0, h * 0.15),
-            Paint()
-              ..color = const Color(0xFF6B4A2B)
-              ..strokeWidth = 4,
-          );
-        }
-      case FacilityType.archeryRange:
-        ground();
-        for (var i = 0; i < 3; i++) {
-          final c = Offset(w * (0.25 + 0.25 * i), h * 0.56);
-          for (final (r, col) in [
-            (w * 0.07, Colors.white),
-            (w * 0.05, Pal.blood),
-            (w * 0.025, Colors.white),
-          ]) {
-            canvas.drawCircle(c, r, Paint()..color = col);
-          }
-          canvas.drawCircle(c, w * 0.07, ink);
-        }
-      case FacilityType.enduranceYard:
-        ground();
-        for (var i = 0; i < 3; i++) {
-          final c = Offset(w * (0.28 + 0.22 * i), h * 0.64);
-          canvas.drawOval(
-            Rect.fromCenter(center: c, width: w * 0.14, height: h * 0.16),
-            Paint()..color = const Color(0xFF8A8F96),
-          );
-          canvas.drawOval(
-            Rect.fromCenter(center: c, width: w * 0.14, height: h * 0.16),
-            ink,
-          );
-        }
-      case FacilityType.infirmary:
-        final tent = Path()
-          ..moveTo(w * 0.1, h * 0.88)
-          ..lineTo(w * 0.5, h * 0.12)
-          ..lineTo(w * 0.9, h * 0.88)
-          ..close();
-        canvas.drawPath(tent, Paint()..color = const Color(0xFFEDE4CC));
-        canvas.drawPath(tent, ink);
-        final cross = Paint()
-          ..color = Pal.blood
-          ..strokeWidth = w * 0.07;
-        canvas.drawLine(
-          Offset(w * 0.5, h * 0.3),
-          Offset(w * 0.5, h * 0.58),
-          cross,
-        );
-        canvas.drawLine(
-          Offset(w * 0.36, h * 0.44),
-          Offset(w * 0.64, h * 0.44),
-          cross,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(w * 0.5, h * 0.55)
-            ..lineTo(w * 0.38, h * 0.88)
-            ..lineTo(w * 0.62, h * 0.88)
-            ..close(),
-          Paint()..color = Pal.ink,
-        );
-      case FacilityType.campfire:
-        canvas.drawOval(
-          Rect.fromLTWH(w * 0.1, h * 0.55, w * 0.8, h * 0.36),
-          dirt,
-        );
-        canvas.drawOval(
-          Rect.fromLTWH(w * 0.1, h * 0.55, w * 0.8, h * 0.36),
-          ink,
-        );
-        for (final dx in [-0.18, 0.0, 0.18]) {
-          canvas.drawLine(
-            Offset(w * (0.5 + dx), h * 0.78),
-            Offset(w * 0.5, h * 0.38),
-            Paint()
-              ..color = const Color(0xFF6B4A2B)
-              ..strokeWidth = 5,
-          );
-        }
-        canvas.drawPath(
-          Path()
-            ..moveTo(w * 0.42, h * 0.74)
-            ..quadraticBezierTo(w * 0.5, h * 0.3, w * 0.58, h * 0.74)
-            ..close(),
-          Paint()..color = const Color(0xFFFFA43A),
-        );
-        canvas.drawCircle(
-          Offset(w * 0.5, h * 0.68),
-          w * 0.05,
-          Paint()..color = const Color(0xFFFFE08A),
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(w * 0.12, h * 0.55, w * 0.1, h * 0.2),
-          Paint()..color = const Color(0xFF8A6A3C),
-        );
-        canvas.drawRect(
-          Rect.fromLTWH(w * 0.78, h * 0.55, w * 0.1, h * 0.2),
-          Paint()..color = const Color(0xFF8A6A3C),
-        );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant FacilityPainter old) => old.type != type;
 }

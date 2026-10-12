@@ -84,7 +84,7 @@ class _Candidate extends StatelessWidget {
     String? lock;
     if (full) {
       lock = 'Doanh trại đã đầy';
-    } else if (s.res[Res.coins]! < cost) {
+    } else if (!GameRules.canAfford(s, {Res.coins: cost})) {
       lock = 'Thiếu ${cost - s.res[Res.coins]!} đồng xu';
     }
     return Panel(

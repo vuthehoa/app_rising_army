@@ -275,17 +275,6 @@ void main() {
     },
   );
 
-  testWidgets('kết thúc ngày từ HUD: ngày tăng, thông báo bổng lộc', (
-    tester,
-  ) async {
-    final c = await boot(tester, newGame: true);
-    await tester.tap(find.text('Kết thúc ngày'));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(c.state!.day, 2);
-    expect(find.textContaining('Bổng lộc nhà vua'), findsOneWidget);
-    await tester.pumpAndSettle(); // thông báo tự tắt, không để lại timer
-  });
-
   testWidgets('game over hiện màn hình kết thúc', (tester) async {
     final c = await boot(tester, newGame: true);
     c.state!.kingSatisfaction = 0;

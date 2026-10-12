@@ -1159,7 +1159,7 @@ const facilityDefs = <FacilityType, FacilityDef>{
     verified: true,
   ),
   FacilityType.campfire: FacilityDef(
-    'Bếp lửa trại',
+    '',
     'Nơi tập hợp binh sĩ. Có sẵn, không xây thêm.',
     {},
     verified: true,
