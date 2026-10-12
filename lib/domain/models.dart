@@ -1,3 +1,5 @@
+import 'identity.dart';
+
 enum Res { food, coins, wood, iron }
 
 enum Role { spearman, archer, cavalry }
@@ -333,6 +335,7 @@ class GameState {
     Map<String, ShopStock>? shops,
     this.visiting,
     this.tradeCount = 0,
+    this.identity = PlayerIdentity.defaults,
   }) : shops = shops ?? {};
 
   final int seed;
@@ -365,6 +368,10 @@ class GameState {
   /// Thành phố đang ở (đã hành quân tới). Chỉ giao dịch được khi đang ở thành phố có người bán đó.
   String? visiting;
   int tradeCount;
+
+  /// Avatar + quân kỳ. Tách biệt hoàn toàn khỏi [soldiers]; không có chỉ số chiến đấu.
+  /// Trường tùy chọn của save v3: thiếu thì dùng mặc định xác định.
+  PlayerIdentity identity;
 
   /// Dữ liệu save v1 gốc được giữ lại nguyên vẹn khi migrate (không âm thầm xóa).
   Map<String, dynamic>? legacy;
@@ -442,6 +449,7 @@ class GameState {
     'shops': {for (final e in shops.entries) e.key: e.value.toJson()},
     'visiting': visiting,
     'tradeCount': tradeCount,
+    'identity': identity.toJson(),
     if (legacy != null) 'legacy': legacy,
   };
 
@@ -520,6 +528,7 @@ class GameState {
         tradeCount: j['tradeCount'] == null
             ? 0
             : intIn(j['tradeCount'], 0, 1 << 30),
+        identity: PlayerIdentity.fromJsonLenient(j['identity']),
         legacy: j['legacy'] == null
             ? null
             : Map<String, dynamic>.from(j['legacy'] as Map),

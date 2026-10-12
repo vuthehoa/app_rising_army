@@ -39,7 +39,17 @@ class GameShell extends StatefulWidget {
 }
 
 class _GameShellState extends State<GameShell> {
-  int _index = 0;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    final fresh = context
+        .getInheritedWidgetOfExactType<ControllerScope>()!
+        .notifier!
+        .freshGame;
+    _index = fresh ? Sections.build : Sections.camp;
+  }
 
   static const _items = [
     (Icons.fort, 'Trại'),

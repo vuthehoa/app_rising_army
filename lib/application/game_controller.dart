@@ -2,8 +2,22 @@ import 'package:flutter/foundation.dart';
 
 import '../data/save_repository.dart';
 import '../domain/battle.dart';
+import '../domain/identity.dart';
+import '../domain/map_anchor.dart';
 import '../domain/models.dart';
 import '../domain/rules.dart';
+
+/// Kết quả tạo ván mới có danh tính. [issues] không rỗng: cấu hình sai, chưa có gì bị thay đổi.
+/// [saveError] khác null: không lưu được, ván mới bị bỏ và ván hiện tại giữ nguyên.
+class NewGameResult {
+  const NewGameResult.ok() : issues = const [], saveError = null;
+  const NewGameResult.invalid(this.issues) : saveError = null;
+  const NewGameResult.saveFailed(this.saveError) : issues = const [];
+
+  final List<IdentityIssue> issues;
+  final String? saveError;
+  bool get ok => issues.isEmpty && saveError == null;
+}
 
 /// Cầu nối UI <-> luật. Mọi thay đổi state đi qua đây và được lưu tự động.
 class GameController extends ChangeNotifier {
@@ -18,8 +32,25 @@ class GameController extends ChangeNotifier {
   ExpeditionResult? lastExpedition;
   GameState? _pendingSave;
 
+  /// true ngay sau khi tạo ván mới thành công; shell dùng để mở màn Xây dựng đầu tiên.
+  bool freshGame = false;
+
   GameState? get state => _state;
   bool get hasSave => _pendingSave != null;
+
+  /// Danh tính của ván đang chơi (null khi đang ở menu).
+  PlayerIdentity? get identity => _state?.identity;
+
+  /// Neo hiển thị avatar trên bản đồ, dẫn xuất từ state (null khi chưa có ván).
+  MapAnchor? get avatarAnchor =>
+      _state == null ? null : resolveMapAnchor(_state!);
+
+  /// Kiểm tra bản nháp ở màn New Game; thuần, không đụng state.
+  List<IdentityIssue> checkIdentityDraft(IdentityDraft draft) =>
+      validateIdentityDraft(draft);
+
+  /// Hợp thành quân kỳ để preview; thuần.
+  FlagComposition previewFlag(LegionFlag flag) => composeFlag(flag);
 
   Future<void> init() async {
     final r = await _repo.load();
@@ -30,6 +61,7 @@ class GameController extends ChangeNotifier {
 
   void continueGame() {
     _state = _pendingSave;
+    freshGame = false;
     notifyListeners();
   }
 
@@ -43,9 +75,39 @@ class GameController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Tạo ván mới với danh tính đã chọn, một thao tác nguyên tử:
+  /// kiểm tra → dựng state → lưu → chỉ khi lưu thành công mới thay state hiện tại.
+  /// Thất bại ở bước nào thì `state`, lastDayReport, lastExpedition và `hasSave` giữ nguyên.
+  Future<NewGameResult> createGame({
+    int? seed,
+    required IdentityDraft draft,
+  }) async {
+    final identity = draft.toIdentity();
+    if (identity == null) {
+      return NewGameResult.invalid(validateIdentityDraft(draft));
+    }
+    final candidate = GameRules.newGame(
+      seed: seed ?? DateTime.now().millisecondsSinceEpoch % 1000000,
+      identity: identity,
+    );
+    try {
+      await _repo.save(candidate);
+    } catch (e) {
+      return NewGameResult.saveFailed('Không thể lưu game: $e');
+    }
+    _state = candidate;
+    freshGame = true;
+    saveError = null;
+    lastDayReport = null;
+    lastExpedition = null;
+    notifyListeners();
+    return const NewGameResult.ok();
+  }
+
   void backToMenu() {
     _pendingSave = _state;
     _state = null;
+    freshGame = false;
     notifyListeners();
   }
 

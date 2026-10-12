@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'battle.dart';
 import 'catalog.dart';
+import 'identity.dart';
 import 'models.dart';
 import 'stats.dart';
 
@@ -100,9 +101,15 @@ class GameRules {
     return sol;
   }
 
-  static GameState newGame({int seed = 1337}) {
+  /// [identity] mặc định là [PlayerIdentity.defaults]. Danh tính tự đặt phải hợp lệ
+  /// (xem [validateIdentity]); nếu không sẽ ném [ArgumentError] thay vì tạo ván hỏng.
+  static GameState newGame({int seed = 1337, PlayerIdentity? identity}) {
+    if (identity != null && validateIdentity(identity).isNotEmpty) {
+      throw ArgumentError.value(identity, 'identity', 'Danh tính không hợp lệ');
+    }
     final s = GameState(
       seed: seed,
+      identity: identity?.trimmed() ?? PlayerIdentity.defaults,
       day: 1,
       res: {Res.food: 80, Res.coins: 120, Res.wood: 40, Res.iron: 20},
       soldiers: [],

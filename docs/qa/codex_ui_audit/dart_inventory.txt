@@ -1,0 +1,258 @@
+
+==========================================================================================
+FILE: lib/application/game_controller.dart
+
+9: class GameController extends ChangeNotifier {
+
+==========================================================================================
+FILE: lib/core/theme.dart
+
+4: class Pal {
+
+==========================================================================================
+FILE: lib/data/migration_v1_v3.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: lib/data/migration_v2_v3.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: lib/data/save_repository.dart
+
+9: abstract class KeyValueStore {
+15: class PrefsStore implements KeyValueStore {
+30: class MemoryStore implements KeyValueStore {
+43: enum LoadStatus {
+52: class LoadResult {
+62: class MigrationStep {
+68: class _Decoded {
+80: class SaveRepository {
+
+==========================================================================================
+FILE: lib/domain/battle.dart
+
+21: class Pos {
+26: class BattleUnit {
+80: class UnitFrame {
+89: class BattleFrame {
+95: class BattleEvent {
+113: class UnitOutcome {
+120: enum Winner { player, enemy, draw }
+133: class BattleReport {
+295: enum FormationPreset { line, expanded, wedge, cluster }
+
+==========================================================================================
+FILE: lib/domain/catalog.dart
+
+56: class TraitDef {
+76: class ItemDef {
+302: enum LocKind { camp, resource, ruins, city }
+304: class EnemySpec {
+311: class LocationDef {
+344: class RegionDef {
+591: enum MissionKind { clear, deliver, levelCount, explore, visit, gearCount }
+593: class MissionTemplate {
+949: enum VendorKind { weapons, armor, accessories, supplies }
+970: class VendorDef {
+1116: class FacilityDef {
+
+==========================================================================================
+FILE: lib/domain/models.dart
+
+1: enum Res { food, coins, wood, iron }
+3: enum Role { spearman, archer, cavalry }
+6: enum Stat { str, dex, con }
+8: enum Slot { weapon, armor, accessory }
+10: enum TraitId { none, bornLeader, brutal, tough, nimble, quickLearner, coward }
+12: enum SoldierStatus { active, dead, deserted }
+14: enum MissionStatus { offered, active, completed, failed }
+16: enum Building { barracks, smithy, tavern }
+20: enum FacilityType {
+30: class ActionResult {
+67: class Soldier {
+185: class Facility {
+232: class Mission {
+269: class ShopStock {
+307: class GameState {
+
+==========================================================================================
+FILE: lib/domain/rules.dart
+
+8: enum CasualtyKind { survived, wounded, dead }
+10: class Casualty {
+19: class DayReport {
+32: class ExpeditionResult {
+49: class GameRules {
+
+==========================================================================================
+FILE: lib/domain/stats.dart
+
+7: class Derived {
+
+==========================================================================================
+FILE: lib/main.dart
+
+28: class RisingArmyApp extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/battle_screen.dart
+
+15: class BattleScreen extends StatefulWidget {
+24: class _BattleScreenState extends State<BattleScreen> {
+
+==========================================================================================
+FILE: lib/presentation/screens/buildings_screen.dart
+
+10: class BuildingsScreen extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/camp_hub.dart
+
+17: class CampHub extends StatefulWidget {
+24: class _CampHubState extends State<CampHub> {
+341: class _Badge extends StatelessWidget {
+385: class _BarButton extends StatelessWidget {
+433: class _FacilityView extends StatelessWidget {
+505: class _SoldierToken extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/city_screen.dart
+
+13: class CityScreen extends StatelessWidget {
+187: class _Stall extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/deploy_screen.dart
+
+24: class DeployScreen extends StatefulWidget {
+38: class _DeployScreenState extends State<DeployScreen> {
+
+==========================================================================================
+FILE: lib/presentation/screens/map_screen.dart
+
+13: class MapScreen extends StatefulWidget {
+20: class _MapScreenState extends State<MapScreen> {
+121: class _Marker extends StatelessWidget {
+184: class _Side extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/menu_screen.dart
+
+8: class MainMenuScreen extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/missions_screen.dart
+
+10: class MissionsScreen extends StatelessWidget {
+109: class _MissionCard extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/recruit_screen.dart
+
+11: class RecruitScreen extends StatelessWidget {
+72: class _Candidate extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/result_screen.dart
+
+11: class ResultScreen extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/roster_screen.dart
+
+12: class RosterScreen extends StatefulWidget {
+19: class _RosterScreenState extends State<RosterScreen> {
+117: class _SoldierTile extends StatelessWidget {
+201: class _Fallen extends StatelessWidget {
+236: class _Detail extends StatelessWidget {
+596: class _EquipDialog extends StatefulWidget {
+611: class _EquipDialogState extends State<_EquipDialog> {
+
+==========================================================================================
+FILE: lib/presentation/screens/shell.dart
+
+13: class ShellNav extends InheritedWidget {
+25: class Sections {
+34: class GameShell extends StatefulWidget {
+41: class _GameShellState extends State<GameShell> {
+196: class _EndOverlay extends StatelessWidget {
+
+==========================================================================================
+FILE: lib/presentation/screens/squad_screen.dart
+
+16: class SquadScreen extends StatefulWidget {
+25: class _SquadScreenState extends State<SquadScreen> {
+
+==========================================================================================
+FILE: lib/presentation/screens/vendor_screen.dart
+
+14: class VendorScreen extends StatefulWidget {
+23: class _VendorScreenState extends State<VendorScreen> {
+
+==========================================================================================
+FILE: lib/presentation/widgets/art.dart
+
+37: class SoldierSprite extends StatelessWidget {
+84: class _SoldierPainter extends CustomPainter {
+292: class ItemGlyph extends StatelessWidget {
+305: class _ItemPainter extends CustomPainter {
+389: final path = Path()
+417: enum BuildingSpot {
+438: class CampPainter extends CustomPainter {
+711: class MapPainter extends CustomPainter {
+799: class FieldPainter extends CustomPainter {
+845: class CityPainter extends CustomPainter {
+949: class CampGroundPainter extends CustomPainter {
+1004: class FacilityPainter extends CustomPainter {
+
+==========================================================================================
+FILE: lib/presentation/widgets/common.dart
+
+9: class ControllerScope extends InheritedNotifier<GameController> {
+21: class Dims {
+30: class Panel extends StatelessWidget {
+101: class GameButton extends StatelessWidget {
+171: class Bar extends StatelessWidget {
+205: class Pill extends StatelessWidget {
+250: class CostText extends StatelessWidget {
+308: class _Toast extends StatefulWidget {
+325: class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
+
+==========================================================================================
+FILE: lib/presentation/widgets/hud.dart
+
+10: class Hud extends StatelessWidget {
+154: class ResourceStrip extends StatelessWidget {
+
+==========================================================================================
+FILE: test/city_flow_test.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: test/city_trade_test.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: test/domain_v2_test.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: test/economy_v2_test.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: test/landscape_flow_test.dart
+
+No obvious declarations found.
+
+==========================================================================================
+FILE: test/migration_v2_v3_test.dart
+
+No obvious declarations found.
