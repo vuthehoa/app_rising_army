@@ -8,6 +8,7 @@ import '../domain/identity.dart';
 import '../domain/map_anchor.dart';
 import '../domain/models.dart';
 import '../domain/rules.dart';
+import 'hero_travel.dart';
 
 /// Kết quả tạo ván mới có danh tính. [issues] không rỗng: cấu hình sai, chưa có gì bị thay đổi.
 /// [saveError] khác null: không lưu được, ván mới bị bỏ và ván hiện tại giữ nguyên.
@@ -38,6 +39,16 @@ class GameController extends ChangeNotifier {
   bool freshGame = false;
 
   GameState? get state => _state;
+
+  /// Điều phối đi bộ trên bản đồ khám phá. Vị trí/thể lực nằm ở [GameState.hero].
+  late final HeroTravel travel = HeroTravel(() => _state, commitTravel);
+
+  /// Lưu vị trí/thể lực sau khi nhân vật dừng và báo UI toàn game dựng lại một lần.
+  void commitTravel() {
+    if (_state == null) return;
+    notifyListeners();
+    _persist();
+  }
 
   /// Develop Mode: miễn chi phí tài nguyên (chỉ debug). Không phải tiến trình: không vào save,
   /// không đổi GameState; chỉ báo UI dựng lại. Xem [DevMode].
@@ -76,10 +87,16 @@ class GameController extends ChangeNotifier {
     _state = _pendingSave;
     freshGame = false;
     _placing = null;
+    _movingId = null;
+    travel.reset();
     // Save cũ có Doanh trại cấp > 0 nhưng chưa có instance trong trại: tạo để trại hiển thị đúng.
-    if (_state != null && GameRules.syncBarracksInstance(_state!)) {
-      _persist();
+    var repaired = false;
+    if (_state != null) {
+      repaired |= GameRules.syncBarracksInstance(_state!);
+      // Save cũ có công trình nằm ngoài vùng đất mới hoặc chồng nhau: dời tới vị trí hợp lệ gần nhất.
+      repaired |= GameRules.repairCampLayout(_state!);
     }
+    if (repaired) _persist();
     notifyListeners();
   }
 
@@ -90,6 +107,8 @@ class GameController extends ChangeNotifier {
     lastDayReport = null;
     lastExpedition = null;
     _placing = null;
+    _movingId = null;
+    travel.reset();
     await _persist();
     notifyListeners();
   }
@@ -115,6 +134,7 @@ class GameController extends ChangeNotifier {
       return NewGameResult.saveFailed('Không thể lưu game: $e');
     }
     _state = candidate;
+    travel.reset();
     freshGame = true;
     saveError = null;
     lastDayReport = null;
@@ -124,9 +144,11 @@ class GameController extends ChangeNotifier {
   }
 
   void backToMenu() {
+    if (_state != null) _persist(); // lưu vị trí/thể lực hiện tại
     _pendingSave = _state;
     _state = null;
     freshGame = false;
+    travel.reset();
     notifyListeners();
   }
 
@@ -141,6 +163,14 @@ class GameController extends ChangeNotifier {
       _apply(() => GameRules.rename(_state!, id, n));
   ActionResult assignToFacility(int soldier, int facility) =>
       _apply(() => GameRules.assignToFacility(_state!, soldier, facility));
+  ActionResult learnSkill(int soldier, String skill) =>
+      _apply(() => GameRules.learnSkill(_state!, soldier, skill));
+  ActionResult chooseTalent(int soldier, String talent) =>
+      _apply(() => GameRules.chooseTalent(_state!, soldier, talent));
+  ActionResult moveSoldier(int soldier, double x, double y) =>
+      _apply(() => GameRules.moveSoldier(_state!, soldier, x, y));
+  ActionResult dismiss(int soldier) =>
+      _apply(() => GameRules.dismiss(_state!, soldier));
   ActionResult unassign(int soldier) =>
       _apply(() => GameRules.unassign(_state!, soldier));
 
@@ -150,7 +180,85 @@ class GameController extends ChangeNotifier {
 
   /// Công trình đang chờ người chơi chọn vị trí trong trại (null = không ở chế độ đặt). Trạng thái UI,
   /// không nằm trong save; mọi giao diện (menu Build, BuildingsScreen) dùng chung để CampHub hiển thị ô đặt.
-  FacilityType? get placing => _placing;
+  FacilityType? get placing => _placing ?? movingFacility?.type;
+
+  // ---------- Di chuyển công trình đã đặt (dùng chung lớp đặt với xây mới) ----------
+
+  int? _movingId;
+
+  /// Trạng thái UI (không lưu): công trình đang được dời. Dữ liệu chỉ đổi khi [confirmMoveAt] thành công.
+  int? get movingId => _movingId;
+  Facility? get movingFacility =>
+      _movingId == null ? null : GameRules.facilityById(_state!, _movingId!);
+
+  /// Vị trí xem trước (chuẩn hóa) khi kéo bằng nhấn giữ; null = chưa kéo.
+  (double, double)? movePreview;
+
+  ActionResult startMove(int facilityId) {
+    final f = GameRules.facilityById(_state!, facilityId);
+    if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
+    _placing = null;
+    _movingId = facilityId;
+    movePreview = null;
+    notifyListeners();
+    return ActionResult.ok(
+      'Chọn vị trí mới cho ${facilityDefs[f.type]!.name}.',
+    );
+  }
+
+  /// Xem trước vị trí khi kéo công trình MỚI từ menu Xây (cùng ghost với dời công trình).
+  void updatePlacementPreview(double x, double y) {
+    if (placing == null) return;
+    movePreview = (x, y);
+    notifyListeners();
+  }
+
+  /// Thả công trình mới kéo từ menu Xây tại (x, y): hợp lệ thì xây đúng một lần; không hợp lệ thì KHÔNG
+  /// mất công trình, vẫn ở chế độ đặt (ghost đỏ) để thử lại hoặc hủy.
+  ActionResult finishDragPlace(double x, double y) {
+    if (_movingId != null) return finishDragMove(x, y);
+    final r = confirmPlacementAt(x, y);
+    if (!r.ok) notifyListeners();
+    return r;
+  }
+
+  void updateMovePreview(double x, double y) {
+    if (_movingId == null) return;
+    movePreview = (x, y);
+    notifyListeners();
+  }
+
+  /// Thả tại (x, y). Hợp lệ: đổi tọa độ, lưu, thoát chế độ. Không hợp lệ: không đổi gì, vẫn ở chế độ dời
+  /// (nút Hủy trả về vị trí cũ).
+  ActionResult confirmMoveAt(double x, double y) {
+    final id = _movingId;
+    if (id == null) {
+      return const ActionResult.fail('Chưa chọn công trình để dời.');
+    }
+    final r = GameRules.moveFacility(_state!, id, x, y);
+    if (r.ok) {
+      _movingId = null;
+      movePreview = null;
+      _afterChange();
+    } else {
+      notifyListeners();
+    }
+    return r;
+  }
+
+  /// Kết thúc kéo-nhấn-giữ: sai vị trí thì hủy hẳn, công trình về chỗ cũ.
+  ActionResult finishDragMove(double x, double y) {
+    final r = confirmMoveAt(x, y);
+    if (!r.ok) cancelPlacement();
+    return r;
+  }
+
+  ActionResult removeFacility(int id) =>
+      _apply(() => GameRules.removeFacility(_state!, id));
+  ActionResult upgradeFacility(int id) =>
+      _apply(() => GameRules.upgradeFacility(_state!, id));
+  ActionResult reviveSoldier(int id) =>
+      _apply(() => GameRules.reviveSoldier(_state!, id));
 
   /// Chọn một mục của catalog trại. XÂY MỚI chỉ bắt đầu chế độ đặt (chưa trừ gì, chưa đổi state);
   /// NÂNG CẤP (Doanh trại đã xây) thực hiện ngay qua luật. Trả về kết quả để UI báo.
@@ -169,23 +277,43 @@ class GameController extends ChangeNotifier {
   }
 
   void cancelPlacement() {
-    if (_placing == null) return;
+    if (_placing == null && _movingId == null) return;
     _placing = null;
+    _movingId = null;
+    movePreview = null;
     notifyListeners();
   }
 
-  /// Xác nhận đặt công trình đang chờ tại vị trí [index]. Luật xác thực lại mọi điều kiện; chỉ khi hợp lệ
-  /// mới trừ tài nguyên và tạo công trình. Luôn thoát chế độ đặt (chống bấm lặp).
+  /// Thả công trình đang chờ tại (x, y) (tọa độ chuẩn hóa của khung Trại). Luật xác thực lại vị trí bằng đúng
+  /// hàm giao diện dùng để tô xanh/đỏ ([GameRules.checkPlacement]).
+  /// * Vị trí không hợp lệ: không xây, không trừ phí, vẫn ở chế độ đặt để thử lại hoặc hủy.
+  /// * Hợp lệ: xây đúng một lần, trừ phí và thoát chế độ đặt (chống bấm/thả lặp).
+  /// * Lỗi khác (ví dụ thiếu tài nguyên): không đổi gì và thoát chế độ đặt.
+  ActionResult confirmPlacementAt(double x, double y) {
+    final type = _placing;
+    if (type == null) {
+      return const ActionResult.fail('Chưa chọn công trình để xây.');
+    }
+    final check = GameRules.checkPlacement(_state!, type, x, y);
+    if (!check.ok) return ActionResult.fail(check.message);
+    _placing = null;
+    _movingId = null;
+    movePreview = null;
+    final r = _apply(() => GameRules.buildFacilityAt(_state!, type, x, y));
+    if (!r.ok) notifyListeners();
+    return r;
+  }
+
+  /// Đặt theo ô tham chiếu (lối gọi tương thích): luôn thoát chế độ đặt.
   ActionResult confirmPlacement(int index) {
     final type = _placing;
     if (type == null) {
       return const ActionResult.fail('Chưa chọn công trình để xây.');
     }
     _placing = null;
+    _movingId = null;
     final r = _apply(() => GameRules.buildFacility(_state!, type, index));
-    if (!r.ok) {
-      notifyListeners();
-    }
+    if (!r.ok) notifyListeners();
     return r;
   }
 
@@ -202,8 +330,8 @@ class GameController extends ChangeNotifier {
       _apply(() => GameRules.abandonMission(_state!, id));
   ActionResult completeMission(int id) =>
       _apply(() => GameRules.completeMission(_state!, id));
-  ActionResult scoutRegion(String id) =>
-      _apply(() => GameRules.scoutRegion(_state!, id));
+  ActionResult enterTown(String id) =>
+      _apply(() => GameRules.enterTown(_state!, id));
 
   ActionResult buyFromVendor(String vendor, String item, int qty) =>
       _apply(() => GameRules.buyFromVendor(_state!, vendor, item, qty));

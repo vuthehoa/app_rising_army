@@ -4,6 +4,7 @@ import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
+import '../../domain/progression.dart';
 import '../../domain/rules.dart';
 import '../../domain/stats.dart';
 import '../widgets/art.dart';
@@ -655,7 +656,9 @@ class _VendorScreenState extends State<VendorScreen> {
     if (it.defense > 0) 'Giáp +${it.defense}',
     if (it.speed != 0) 'Tốc ${it.speed > 0 ? '+' : ''}${it.speed}',
     for (final b in it.bonus.entries) '${statNames[b.key]} +${b.value}',
-    if (it.roles.length < 3) it.roles.map((r) => roleNames[r]).join('/'),
+    if (it.weaponType != null)
+      '${weaponProfiles[it.weaponType]!.name} • ${it.interval.toStringAsFixed(1)}s • ${it.range.toStringAsFixed(1)}m',
+    if (it.totalArmorPen > 0) 'Xuyên giáp ${it.totalArmorPen}',
     if (it.reqLevel > 1) 'Cấp ${it.reqLevel}+',
     if (it.reqStr > 0) 'SM ${it.reqStr}+',
   ].join(' • ');

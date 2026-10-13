@@ -245,6 +245,9 @@ const resIcons = <Res, IconData>{
   Res.coins: Icons.paid,
   Res.wood: Icons.forest,
   Res.iron: Icons.hardware,
+  Res.tools: Icons.build,
+  Res.stone: Icons.terrain,
+  Res.cloth: Icons.checkroom,
 };
 
 class CostText extends StatelessWidget {

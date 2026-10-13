@@ -1,3 +1,5 @@
+import 'package:app_rising_army/domain/camp_layout.dart';
+
 import 'dart:convert';
 
 import 'package:app_rising_army/application/game_controller.dart';
@@ -92,7 +94,7 @@ void main() {
       final c = await newController(MemoryStore());
       c.state!.res.updateAll((_, _) => 999);
       c.chooseCampBuilding(def('storage_chest'));
-      final spot = GameRules.freeChestSpotIndices(c.state!).first;
+      final spot = -1;
       final coins = c.state!.res[Res.coins]!;
       expect(c.confirmPlacement(spot).ok, isTrue);
       expect(c.confirmPlacement(spot).ok, isFalse);
@@ -105,53 +107,74 @@ void main() {
   });
 
   group('Hòm đồ: nhiều instance và vị trí', () {
-    test('nhiều hòm: id riêng, vị trí hợp lệ, không trùng, không đè bếp lửa/ô công trình/HUD', () {
+    test('nhiều hòm: id riêng, vị trí hợp lệ theo hàm chung, không trùng, không chiếm ô công trình', () {
       final s = GameRules.newGame(seed: 1)..res.updateAll((_, _) => 99999);
-      for (var i = 0; i < 60; i++) {
-        final spot = GameRules.freeChestSpotIndices(s).first;
+      const n = 30;
+      for (var i = 0; i < n; i++) {
         expect(
-          GameRules.buildFacility(s, FacilityType.storageChest, spot).ok,
+          GameRules.buildFacility(s, FacilityType.storageChest, -1).ok,
           isTrue,
+          reason: 'hòm $i',
         );
       }
-      expect(GameRules.chestCount(s), 60);
-      expect(s.facilities.map((f) => f.id).toSet().length, 60);
-      // 18 hòm đầu có vị trí khác nhau.
-      final first = s.facilities
-          .take(GameRules.chestGridSize)
-          .map((f) => (f.x, f.y))
-          .toSet();
-      expect(first.length, GameRules.chestGridSize);
+      expect(GameRules.chestCount(s), n);
+      expect(s.facilities.map((f) => f.id).toSet().length, n);
+      expect(s.facilities.map((f) => (f.x, f.y)).toSet().length, n);
       for (final f in s.facilities) {
-        expect(f.x, inInclusiveRange(0.02, 0.98));
-        expect(f.y, inInclusiveRange(0.15, 0.8));
-        // Không nằm trên bếp lửa giữa trại.
+        final others = s.facilities.where((o) => o.id != f.id);
         expect(
-          (f.x - GameRules.campfireSpot.$1).abs() > 0.1 ||
-              (f.y - GameRules.campfireSpot.$2).abs() > 0.1,
+          CampLayout.check(others, f.type, f.x, f.y).ok,
           isTrue,
+          reason: 'hòm ${f.id}',
         );
       }
-      // Hòm không chiếm ô công trình.
       expect(GameRules.slotFacilityCount(s), 0);
-      expect(
-        GameRules.freeSlotIndices(s).length,
-        GameRules.facilitySlots.length - 1,
-      );
     });
 
     test(
-      'vị trí hòm không hợp lệ (đã có hòm) bị từ chối, không trừ tài nguyên',
+      'vài hòm đầu ưu tiên chỗ trống giữa các ô nên không chiếm ô công trình',
+      () {
+        final s = GameRules.newGame(seed: 1)..res.updateAll((_, _) => 99999);
+        for (var i = 0; i < 4; i++) {
+          GameRules.buildFacility(s, FacilityType.storageChest, -1);
+        }
+        expect(
+          GameRules.freeSlotIndices(s).length,
+          GameRules.facilitySlots.length,
+        );
+      },
+    );
+
+    test(
+      'khi đất đầy: từ chối, không trừ tài nguyên, không đổi trạng thái',
+      () {
+        final s = GameRules.newGame(seed: 1)..res.updateAll((_, _) => 99999);
+        var guard = 0;
+        while (GameRules.buildFacility(s, FacilityType.storageChest, -1).ok &&
+            guard++ < 500) {}
+        expect(guard, lessThan(500), reason: 'phải có giới hạn hình học');
+        final res = Map.of(s.res);
+        final n = s.facilities.length;
+        expect(
+          GameRules.buildFacility(s, FacilityType.storageChest, -1).ok,
+          isFalse,
+        );
+        expect(s.res, res);
+        expect(s.facilities.length, n);
+      },
+    );
+
+    test(
+      'vị trí hòm không hợp lệ (đè hòm đã có) bị từ chối, không trừ tài nguyên',
       () {
         final s = GameRules.newGame(seed: 1)..res.updateAll((_, _) => 999);
-        final spot = GameRules.freeChestSpotIndices(s).first;
         expect(
-          GameRules.buildFacility(s, FacilityType.storageChest, spot).ok,
+          GameRules.buildFacilityAt(s, FacilityType.storageChest, 0.3, 0.3).ok,
           isTrue,
         );
         final res = Map.of(s.res);
         expect(
-          GameRules.buildFacility(s, FacilityType.storageChest, spot).ok,
+          GameRules.buildFacilityAt(s, FacilityType.storageChest, 0.3, 0.3).ok,
           isFalse,
         );
         expect(s.res, res);
@@ -169,7 +192,7 @@ void main() {
       c.confirmPlacement(GameRules.freeSlotIndices(c.state!).first);
       for (var i = 0; i < 3; i++) {
         c.chooseCampBuilding(def('storage_chest'));
-        c.confirmPlacement(GameRules.freeChestSpotIndices(c.state!).first);
+        c.confirmPlacement(-1);
       }
       await Future<void>.delayed(Duration.zero);
       final cap = GameRules.inventoryCapacity(c.state!);
@@ -265,7 +288,7 @@ void main() {
       c.confirmPlacement(GameRules.freeSlotIndices(c.state!).first);
       for (var i = 0; i < 3; i++) {
         c.chooseCampBuilding(def('storage_chest'));
-        c.confirmPlacement(GameRules.freeChestSpotIndices(c.state!).first);
+        c.confirmPlacement(-1);
       }
       await tester.pumpAndSettle();
       for (final f in c.state!.facilities) {

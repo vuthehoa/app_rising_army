@@ -5,9 +5,9 @@ import '../../../core/theme.dart';
 import '../../../domain/catalog.dart';
 import '../../../domain/models.dart';
 import '../../../domain/stats.dart';
-import '../../screens/shell.dart';
 import '../art.dart';
 import '../common.dart';
+import 'soldier_info_dialog.dart';
 
 /// Binh sĩ trong trại: kéo-thả vào công trình, chạm để xem thẻ nhanh.
 class CampSoldierToken extends StatelessWidget {
@@ -41,11 +41,17 @@ class CampSoldierToken extends StatelessWidget {
     );
     return Draggable<int>(
       data: soldier.id,
+      // Feedback có góc trên-trái đúng tại ngón tay (rồi dịch nửa kích thước) nên vị trí thả = vị trí ngón
+      // tay, bất kể zoom (xem CampSoldierDropGround).
+      dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: Material(
         color: Colors.transparent,
-        child: Opacity(
-          opacity: 0.85,
-          child: SoldierSprite.of(soldier, bust: false, size: size * 1.3),
+        child: Transform.translate(
+          offset: Offset(-size * 0.65, -size * 0.65),
+          child: Opacity(
+            opacity: 0.85,
+            child: SoldierSprite.of(soldier, bust: false, size: size * 1.3),
+          ),
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.3, child: sprite),
@@ -64,51 +70,6 @@ class CampSoldierToken extends StatelessWidget {
     );
   }
 
-  void _card(BuildContext context) {
-    final d = deriveStats(soldier);
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(soldier.name),
-        content: SizedBox(
-          width: 300,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${roleNames[soldier.role]} • Cấp ${soldier.level} • Kinh nghiệm ${soldier.xp}/${xpForNext(soldier.level)}',
-              ),
-              const SizedBox(height: 6),
-              Text('HP ${soldier.hp}/${d.maxHp} • Tinh thần ${soldier.morale}'),
-              Text(
-                'Sức mạnh ${d.stats[Stat.str]} • Khéo léo ${d.stats[Stat.dex]} • Thể trạng ${d.stats[Stat.con]}',
-              ),
-              Text(
-                'Tốc độ ${d.speed.toStringAsFixed(1)} m/s • Chu kỳ đánh ${d.interval.toStringAsFixed(1)} s • Chính xác ${(d.accuracy * 100).round()}%',
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Kéo binh sĩ thả lên công trình để huấn luyện hoặc chữa trị.',
-                style: TextStyle(color: Pal.dim, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ShellNav.of(context).go(Sections.roster);
-            },
-            child: const Text('Chi tiết'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng'),
-          ),
-        ],
-      ),
-    );
-  }
+  void _card(BuildContext context) =>
+      showSoldierInfoDialog(context, controller, soldier.id);
 }

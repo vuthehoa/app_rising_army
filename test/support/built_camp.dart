@@ -9,9 +9,9 @@ GameState newGameWithBuiltCamp({int seed = 7}) {
   s.buildings[Building.barracks] = 1;
   s.buildings[Building.smithy] = 1;
   for (final (type, x, y) in [
-    (FacilityType.meleeYard, 0.27, 0.4),
-    (FacilityType.archeryRange, 0.5, 0.3),
-    (FacilityType.infirmary, 0.76, 0.4),
+    (FacilityType.meleeYard, 0.1925, 0.245),
+    (FacilityType.archeryRange, 0.3975, 0.245),
+    (FacilityType.infirmary, 0.6025, 0.245),
   ]) {
     s.facilities.add(Facility(id: s.nextFacilityId++, type: type, x: x, y: y));
   }

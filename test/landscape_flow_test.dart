@@ -3,6 +3,8 @@ import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
+import 'package:app_rising_army/domain/world_data.dart';
+import 'package:app_rising_army/domain/world_map.dart';
 import 'package:app_rising_army/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -108,7 +110,9 @@ void main() {
       expect(find.text('BẢNG NHIỆM VỤ CỦA NHÀ VUA'), findsOneWidget);
       await tapText(tester, 'Trại');
       await tapText(tester, 'map');
-      expect(find.text('Trinh sát'), findsWidgets);
+      expect(find.byKey(const ValueKey('map-surface')), findsOneWidget);
+      expect(find.text('Trinh sát'), findsNothing);
+      expect(find.text('Bản đồ thế giới'), findsNothing);
     },
   );
 
@@ -161,7 +165,7 @@ void main() {
       c.endDay();
       await tester.pumpAndSettle();
       final n = c.state!.facilities.length;
-      await tester.tap(find.text('build'));
+      await tester.tap(find.text('Xây'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('camp-build-archery_range')));
       await tester.pumpAndSettle();
@@ -251,7 +255,12 @@ void main() {
       final c = await boot(tester, newGame: true, size: const Size(932, 430));
       await tapText(tester, 'Bản đồ');
       // Chọn trại cướp trên bản đồ qua semantics.
-      await tester.tap(find.bySemanticsLabel('Trại cướp đường'));
+      // Camera bản đồ bám theo nhân vật: đưa nhân vật tới gần trại cướp để nó nằm trong tầm nhìn.
+      final camp = worldMap.placements['g_bandits']!;
+      c.state!.hero.position = WPoint(camp.x + 120, camp.y);
+      c.commitTravel();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('poi-g_bandits')));
       await tester.pumpAndSettle();
       expect(find.text('Trại cướp đường'), findsWidgets);
       await tapText(tester, 'Chuẩn bị đội hình');
@@ -259,7 +268,7 @@ void main() {
       await tapText(tester, 'Tự chọn');
       await tapText(tester, 'Tiếp tục: triển khai');
       expect(find.text('Fight!'), findsOneWidget);
-      expect(find.text('ASSIGN_ORDERS'), findsOneWidget);
+      expect(find.text('ASSIGN_ORDERS'), findsNothing); // nút lệnh giả đã gỡ
       await tapText(tester, 'Deploy Units');
       await tapText(tester, 'Fight!');
       expect(find.text('NHẬT KÝ CHIẾN ĐẤU'), findsOneWidget);
@@ -312,7 +321,12 @@ void main() {
       await tester.tap(find.byIcon(Icons.close));
       await tester.pumpAndSettle();
       await tapText(tester, 'Bản đồ');
-      await tester.tap(find.bySemanticsLabel('Trại cướp đường'));
+      // Camera bản đồ bám theo nhân vật: đưa nhân vật tới gần trại cướp để nó nằm trong tầm nhìn.
+      final camp = worldMap.placements['g_bandits']!;
+      c.state!.hero.position = WPoint(camp.x + 120, camp.y);
+      c.commitTravel();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('poi-g_bandits')));
       await tester.pumpAndSettle();
       await tapText(tester, 'Chuẩn bị đội hình');
       await tapText(tester, 'Tự chọn');

@@ -3,12 +3,14 @@ import 'dart:io';
 
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/camp_layout.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/main.dart';
 import 'package:app_rising_army/presentation/dev/dev_screens.dart';
 import 'package:app_rising_army/presentation/widgets/buildings/buildings.dart';
+import 'package:app_rising_army/presentation/widgets/buildings/camp_scene/camp_ground_painter.dart';
 import 'package:app_rising_army/presentation/widgets/camp/camp_build_menu.dart';
 import 'package:app_rising_army/presentation/widgets/camp/camp_facility_view.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +26,22 @@ Future<GameController> boot(WidgetTester tester) async {
   await c.newGame(seed: 5);
   await tester.pumpAndSettle();
   return c;
+}
+
+/// Kéo-thả công trình đang chờ đặt từ giữa khung tới (nx, ny) chuẩn hóa của khung Trại.
+Future<void> dropAt(WidgetTester tester, double nx, double ny) async {
+  final w = tester.getRect(
+    find.byWidgetPredicate(
+      (w) => w is CustomPaint && w.painter is CampGroundPainter,
+    ),
+  );
+  Offset at(double x, double y) =>
+      w.topLeft + Offset(x * w.width, y * w.height);
+  final g = await tester.startGesture(at(0.5, 0.35));
+  await g.moveTo(at(nx, ny));
+  await tester.pump();
+  await g.up();
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -101,7 +119,7 @@ void main() {
       'liệt kê đúng 7 công trình trại, không Quán rượu/Lò rèn/bếp lửa',
       (tester) async {
         await boot(tester);
-        await tester.tap(find.text('build'));
+        await tester.tap(find.text('Xây'));
         await tester.pumpAndSettle();
 
         expect(find.byType(CampBuildTile), findsNWidgets(7));
@@ -114,7 +132,11 @@ void main() {
           'Bãi đá',
           'Bia mộ',
         ]) {
-          expect(find.textContaining('$name •'), findsOneWidget, reason: name);
+          expect(
+            find.text(name),
+            findsNothing,
+            reason: 'Camp chỉ hiển thị art',
+          );
         }
         expect(find.textContaining('Quán rượu'), findsNothing);
         expect(find.textContaining('Lò rèn'), findsNothing);
@@ -127,19 +149,22 @@ void main() {
       (tester) async {
         final c = await boot(tester);
         final before = jsonEncode(c.state!.toJson());
-        await tester.tap(find.text('build'));
+        await tester.tap(find.text('Xây'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('camp-build-barracks')));
+        await tester.longPress(
+          find.byKey(const ValueKey('camp-build-barracks')),
+        ); // nhấn giữ để chọn; chạm chỉ xem thông tin
         await tester.pumpAndSettle();
         expect(c.placing, FacilityType.barracks);
         expect(jsonEncode(c.state!.toJson()), before, reason: 'chưa trừ gì');
-        expect(find.textContaining('Chạm một ô vàng'), findsOneWidget);
-        await tester.tap(find.text('Đặt Doanh trại').first);
-        await tester.pumpAndSettle();
+        expect(find.textContaining('Kéo Doanh trại'), findsOneWidget);
+        await dropAt(tester, 0.5, 0.47); // đè bếp lửa → đỏ → không xây
+        expect(c.placing, FacilityType.barracks);
+        expect(jsonEncode(c.state!.toJson()), before);
+        await dropAt(tester, 0.3975, 0.245);
         expect(c.placing, isNull);
         expect(c.state!.buildings[Building.barracks], 1);
         expect(GameRules.facilityCount(c.state!, FacilityType.barracks), 1);
-        expect(find.textContaining('Doanh trại • Cấp 1'), findsOneWidget);
       },
     );
 
@@ -150,9 +175,9 @@ void main() {
         c.state!.res.updateAll((_, _) => 999);
         final cap0 = GameRules.inventoryCapacity(c.state!);
         for (var i = 1; i <= 3; i++) {
-          await tester.tap(find.text('build'));
+          await tester.tap(find.text('Xây'));
           await tester.pumpAndSettle();
-          await tester.tap(
+          await tester.longPress(
             find.byKey(const ValueKey('camp-build-storage_chest')),
           );
           await tester.pumpAndSettle();
@@ -162,8 +187,7 @@ void main() {
             GameRules.inventoryCapacity(c.state!),
             cap0 + (i - 1) * chestInventoryBonus,
           );
-          await tester.tap(find.byIcon(Icons.add).first);
-          await tester.pumpAndSettle();
+          await dropAt(tester, const [0.2, 0.3, 0.8][i - 1], 0.3);
           expect(GameRules.chestCount(c.state!), i);
           expect(
             GameRules.inventoryCapacity(c.state!),
@@ -190,10 +214,17 @@ void main() {
       expect(s.facilities, isEmpty);
       final free = GameRules.freeSlotIndices(s);
       for (final i in free) {
-        expect(GameRules.facilitySlots[i], isNot(GameRules.campfireSpot));
+        final p = GameRules.facilitySlots[i];
+        expect(p, isNot(GameRules.campfireSpot));
+        // Ô tham chiếu không bao giờ đè lên vùng bảo vệ của bếp lửa.
+        expect(
+          CampLayout.check(s.facilities, FacilityType.meleeYard, p.$1, p.$2).ok,
+          isTrue,
+        );
       }
-      expect(free.length, GameRules.facilitySlots.length - 1);
-      expect(maxFacilities, greaterThanOrEqualTo(free.length));
+      expect(free.length, GameRules.facilitySlots.length);
+      expect(GameRules.facilitySlots, hasLength(12));
+      expect(free.length, greaterThanOrEqualTo(maxFacilities));
       expect(
         FacilityType.values.map((t) => t.name),
         isNot(contains('campfire')),
@@ -209,7 +240,7 @@ void main() {
     test('save cũ có bếp lửa trong công trình vẫn đọc được, công trình thật được giữ', () {
       final s = GameRules.newGame(seed: 3);
       s.res.updateAll((_, _) => 999);
-      expect(GameRules.buildFacility(s, FacilityType.meleeYard, 4).ok, isTrue);
+      expect(GameRules.buildFacility(s, FacilityType.meleeYard, 0).ok, isTrue);
       final j = jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>;
       final facs = (j['facilities'] as List).cast<Map<String, dynamic>>();
       final realId = facs.single['id'] as int;

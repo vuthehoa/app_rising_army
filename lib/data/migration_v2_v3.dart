@@ -104,12 +104,20 @@ Map<String, dynamic> migrateV2toV3(Map<String, dynamic> v2) {
   final ground = lvl('trainingGround'), infirmary = lvl('infirmary');
 
   final facilities = <Facility>[
-    Facility(id: 1, type: FacilityType.meleeYard, x: 0.27, y: 0.4),
-    Facility(id: 2, type: FacilityType.archeryRange, x: 0.5, y: 0.3),
-    Facility(id: 3, type: FacilityType.infirmary, x: 0.76, y: 0.4),
+    for (final (i, t) in [
+      FacilityType.meleeYard,
+      FacilityType.archeryRange,
+      FacilityType.infirmary,
+    ].indexed)
+      Facility(
+        id: i + 1,
+        type: t,
+        x: GameRules.facilitySlots[i].$1,
+        y: GameRules.facilitySlots[i].$2,
+      ),
   ];
   var nextId = 4;
-  var slot = 4;
+  var slot = 3;
   void extra(FacilityType t) {
     final p = GameRules.facilitySlots[slot++];
     facilities.add(Facility(id: nextId++, type: t, x: p.$1, y: p.$2));

@@ -8,6 +8,7 @@ import '../../domain/models.dart';
 import '../../domain/rules.dart';
 import '../../domain/stats.dart';
 import '../widgets/art.dart';
+import '../widgets/battle/battle_widgets.dart';
 import '../widgets/common.dart';
 import 'battle_screen.dart';
 
@@ -19,8 +20,16 @@ const _factionNames = [
   'Dao Găm Xám',
 ];
 
-/// Triển khai trước trận (VERIFIED theo ảnh/clip chính thức): kéo biểu tượng binh sĩ vào vùng triển khai
-/// bên trái, 4 đội hình mẫu, `Fight!`. Nút lệnh từng đơn vị chưa làm vì chưa đủ bằng chứng về nội dung lệnh.
+/// Triển khai trước trận (VERIFIED theo ảnh/clip chính thức): đặt binh sĩ vào vùng triển khai bên trái,
+/// 4 đội hình mẫu, `Fight!`. Nút lệnh từng đơn vị chưa làm vì chưa đủ bằng chứng về nội dung lệnh
+/// (nên không hiển thị nút giả).
+///
+/// Bố cục: thanh tiêu đề (trận + so sánh lực lượng) / thân (chiến trường + danh sách quân: cột bên trái ở màn
+/// rộng, dải ngang bên dưới ở màn hẹp) / thanh hành động cố định. Mọi vùng cuộn nằm trong phần danh sách quân
+/// hoặc dải đội hình, nên nút `Fight!` luôn nằm trong tầm nhìn.
+///
+/// Đặt quân: chạm thẻ để chọn rồi chạm vùng triển khai, hoặc nhấn giữ thẻ để kéo thả. Quân đã đặt kéo để dời,
+/// bấm đúp hoặc nút "Rút" để thu hồi.
 class DeployScreen extends StatefulWidget {
   const DeployScreen({
     super.key,
@@ -38,15 +47,13 @@ class DeployScreen extends StatefulWidget {
 class _DeployScreenState extends State<DeployScreen> {
   final Map<int, Pos> _placed = {};
   final _fieldKey = GlobalKey();
+  int? _selected;
+  bool _fighting = false;
 
-  Size _fieldSize = Size.zero;
-
-  double get _scale => _fieldSize.width / fieldW;
-
-  Pos _toField(Offset global) {
+  Pos _toField(Offset global, double scale) {
     final box = _fieldKey.currentContext!.findRenderObject()! as RenderBox;
     final local = box.globalToLocal(global);
-    return clampToDeployZone(local.dx / _scale, local.dy / _scale);
+    return clampToDeployZone(local.dx / scale, local.dy / scale);
   }
 
   @override
@@ -61,318 +68,261 @@ class _DeployScreenState extends State<DeployScreen> {
     final enemies = GameRules.previewEnemies(loc.enemies);
     final epos = enemyPlacement(enemies);
     final faction = _factionNames[loc.id.hashCode.abs() % _factionNames.length];
-    final all = _placed.length == squad.length;
+    final all = squad.isNotEmpty && _placed.length == squad.length;
+    final sel = _selected == null ? null : s.soldier(_selected!);
 
-    Widget card(Soldier so) {
-      final placed = _placed.containsKey(so.id);
-      final w = deriveStats(so);
-      final content = Container(
-        width: 60,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: placed ? Pal.panelHi : const Color(0xFFF3DDB0),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: placed ? Pal.line : Pal.ink, width: 2),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Opacity(
-              opacity: placed ? 0.4 : 1,
-              child: SoldierSprite.of(so, size: 34),
-            ),
-            Icon(
-              w.ranged ? Icons.gps_fixed : Icons.shield,
-              size: 12,
-              color: placed ? Pal.dim : Pal.ink,
-            ),
-            Text(
-              so.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 9,
-                color: placed ? Pal.dim : Pal.ink,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      );
-      return Draggable<int>(
-        data: so.id,
-        feedback: Material(
-          color: Colors.transparent,
-          child: Opacity(
-            opacity: 0.9,
-            child: SoldierSprite.of(so, bust: false, size: 44),
-          ),
-        ),
-        childWhenDragging: Opacity(opacity: 0.3, child: content),
-        child: content,
-      );
-    }
+    final allyHp = squad.fold(0, (a, b) => a + startHpOf(b));
+    final foeHp = enemies.fold(0, (a, b) => a + startHpOf(b));
 
     return Scaffold(
       backgroundColor: const Color(0xFF8A7447),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Tiêu đề hai bên.
-            Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              color: Pal.panel,
-              child: Row(
-                children: [
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back, size: 20),
-                  ),
-                  const Text(
-                    'Rising Army',
-                    style: TextStyle(
-                      color: Pal.gold,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.shield, size: 18, color: Pal.steel),
-                  ),
-                  Flexible(
-                    child: Text(
-                      faction,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Pal.text,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      '${loc.name} • ${enemies.length} địch',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Pal.dim, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, box) {
-                  final scale = (box.maxWidth / fieldW).clamp(
-                    0.0,
-                    box.maxHeight / fieldH,
-                  );
-                  _fieldSize = Size(fieldW * scale, fieldH * scale);
-                  final spr = (scale * 2.4).clamp(22.0, 44.0);
-                  return Center(
-                    child: DragTarget<int>(
-                      onAcceptWithDetails: (d) {
-                        // Vị trí thả: tâm của bóng kéo ≈ offset + nửa kích thước.
-                        final p = _toField(d.offset + const Offset(22, 40));
-                        setState(() => _placed[d.data] = p);
-                      },
-                      builder: (context, cand, _) => SizedBox(
-                        key: _fieldKey,
-                        width: _fieldSize.width,
-                        height: _fieldSize.height,
-                        child: Stack(
-                          clipBehavior: Clip.none,
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final wide = box.maxWidth >= 640;
+            final field = _buildField(squad, enemies, epos);
+            final list = _SquadList(
+              squad: squad,
+              placed: _placed,
+              selected: _selected,
+              horizontal: !wide,
+              onSelect: (id) => setState(() => _selected = id),
+            );
+            return Column(
+              children: [
+                _Header(
+                  title: loc.name,
+                  faction: faction,
+                  ally: squad.length,
+                  allyHp: allyHp,
+                  foe: enemies.length,
+                  foeHp: foeHp,
+                  placed: _placed.length,
+                  onBack: () => Navigator.pop(context),
+                ),
+                Expanded(
+                  child: wide
+                      ? Row(
                           children: [
-                            Positioned.fill(
-                              child: CustomPaint(painter: FieldPainter()),
-                            ),
-                            // Vùng triển khai.
-                            Positioned(
-                              left: deployMinX * scale,
-                              top: deployMinY * scale,
-                              width: (deployMaxX - deployMinX) * scale,
-                              height: (deployMaxY - deployMinY) * scale,
-                              child: IgnorePointer(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color:
-                                        (cand.isNotEmpty
-                                                ? Pal.gold
-                                                : Colors.white)
-                                            .withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.7,
-                                      ),
-                                      width: 2,
-                                    ),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    '${_placed.length}/${squad.length}',
-                                    style: TextStyle(
-                                      fontSize: scale * 5,
-                                      fontWeight: FontWeight.w900,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.55,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                            SizedBox(
+                              width: (box.maxWidth * 0.28).clamp(210.0, 280.0),
+                              child: _Rail(
+                                list: list,
+                                selected: sel,
+                                placed:
+                                    sel != null && _placed.containsKey(sel.id),
+                                onRecall: _recallSelected,
                               ),
                             ),
-                            // Địch (xem trước).
-                            for (final e in enemies)
-                              Positioned(
-                                left: (epos[e.id]!.x) * scale - spr / 2,
-                                top: (epos[e.id]!.y) * scale - spr / 2,
-                                child: SoldierSprite.of(
-                                  e,
-                                  bust: false,
-                                  size: spr,
-                                  enemy: true,
-                                ),
+                            Expanded(child: field),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Expanded(child: field),
+                            if (sel != null)
+                              _NarrowInfo(
+                                soldier: sel,
+                                placed: _placed.containsKey(sel.id),
+                                onRecall: _recallSelected,
                               ),
-                            // Quân ta đã đặt: kéo để dời.
-                            for (final so in squad)
-                              if (_placed.containsKey(so.id))
-                                Positioned(
-                                  left: _placed[so.id]!.x * scale - spr / 2,
-                                  top: _placed[so.id]!.y * scale - spr / 2,
-                                  child: GestureDetector(
-                                    onPanUpdate: (u) => setState(() {
-                                      final p = _placed[so.id]!;
-                                      _placed[so.id] = clampToDeployZone(
-                                        p.x + u.delta.dx / scale,
-                                        p.y + u.delta.dy / scale,
-                                      );
-                                    }),
-                                    onDoubleTap: () =>
-                                        setState(() => _placed.remove(so.id)),
-                                    child: Semantics(
-                                      label: 'Quân ta ${so.name}',
-                                      child: SoldierSprite.of(
-                                        so,
-                                        bust: false,
-                                        size: spr,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                            SizedBox(height: 78, child: list),
                           ],
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            // Thanh dưới: thẻ binh sĩ, đội hình mẫu, nút.
-            Container(
-              color: Pal.panel.withValues(alpha: 0.96),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final so in squad)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: card(so),
-                      ),
-                    const SizedBox(width: 10),
-                    for (final p in FormationPreset.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: Tooltip(
-                          message: formationNames[p]!,
-                          child: InkWell(
-                            onTap: () => setState(() {
-                              _placed
-                                ..clear()
-                                ..addAll(presetPlacement(p, squad));
-                            }),
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF3DDB0),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Pal.ink, width: 2),
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.casino, size: 18, color: Pal.ink),
-                                  Text(
-                                    '${p.index + 3}',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w900,
-                                      color: Pal.ink,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: 130,
-                      child: GameButton(
-                        label: 'Deploy Units',
-                        dense: true,
-                        onPressed: () => setState(() {
-                          _placed
-                            ..clear()
-                            ..addAll(
-                              presetPlacement(FormationPreset.line, squad),
-                            );
-                        }),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: 150,
-                      child: GameButton(
-                        label: 'ASSIGN_ORDERS',
-                        dense: true,
-                        onPressed: null,
-                        lockedReason:
-                            'Chưa làm: chưa đủ bằng chứng về nội dung lệnh',
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: 110,
-                      child: GameButton(
-                        label: 'Fight!',
-                        dense: true,
-                        icon: Icons.sports_martial_arts,
-                        lockedReason: all
-                            ? null
-                            : 'Triển khai đủ ${squad.length}/${squad.length} binh sĩ',
-                        onPressed: () => _fight(context, c, squad),
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ),
-          ],
+                _ActionBar(
+                  canFight: all && !_fighting,
+                  lockedReason: _fighting
+                      ? 'Đang xuất trận…'
+                      : (all
+                            ? null
+                            : 'Triển khai đủ ${_placed.length}/${squad.length} binh sĩ'),
+                  placed: _placed.length,
+                  total: squad.length,
+                  onPreset: (p) => setState(() {
+                    _placed
+                      ..clear()
+                      ..addAll(presetPlacement(p, squad));
+                  }),
+                  onAuto: () => setState(() {
+                    _placed
+                      ..clear()
+                      ..addAll(presetPlacement(FormationPreset.line, squad));
+                  }),
+                  onClear: _placed.isEmpty
+                      ? null
+                      : () => setState(() {
+                          _placed.clear();
+                          _selected = null;
+                        }),
+                  onFight: () => _fight(context, c, squad),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
+  void _recallSelected() {
+    final id = _selected;
+    if (id == null) return;
+    setState(() => _placed.remove(id));
+  }
+
+  Widget _buildField(
+    List<Soldier> squad,
+    List<Soldier> enemies,
+    Map<int, Pos> epos,
+  ) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final scale = (box.maxWidth / fieldW).clamp(
+          0.0,
+          box.maxHeight / fieldH,
+        );
+        final size = Size(fieldW * scale, fieldH * scale);
+        final spr = (scale * 2.4).clamp(22.0, 44.0);
+        return Center(
+          child: DragTarget<int>(
+            onAcceptWithDetails: (d) {
+              // Kéo bằng pointerDragAnchorStrategy: offset chính là vị trí ngón tay.
+              final p = _toField(d.offset, scale);
+              setState(() {
+                _placed[d.data] = p;
+                _selected = d.data;
+              });
+            },
+            builder: (context, cand, _) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (d) {
+                final id = _selected;
+                if (id == null) return;
+                final p = clampToDeployZone(
+                  d.localPosition.dx / scale,
+                  d.localPosition.dy / scale,
+                );
+                setState(() => _placed[id] = p);
+              },
+              child: SizedBox(
+                key: _fieldKey,
+                width: size.width,
+                height: size.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: CustomPaint(painter: FieldPainter()),
+                    ),
+                    Positioned(
+                      left: deployMinX * scale,
+                      top: deployMinY * scale,
+                      width: (deployMaxX - deployMinX) * scale,
+                      height: (deployMaxY - deployMinY) * scale,
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: (cand.isNotEmpty ? Pal.gold : Colors.white)
+                                .withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              width: 2,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: _placed.isEmpty
+                              ? Padding(
+                                  padding: const EdgeInsets.all(6),
+                                  child: Text(
+                                    'Chọn một binh sĩ rồi chạm vào đây,\nhoặc dùng đội hình mẫu bên dưới',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: (scale * 1.6).clamp(10.0, 14.0),
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.8,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Text(
+                                  '${_placed.length}/${squad.length}',
+                                  style: TextStyle(
+                                    fontSize: scale * 5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                    for (final e in enemies)
+                      Positioned(
+                        left: epos[e.id]!.x * scale - spr / 2,
+                        top: epos[e.id]!.y * scale - spr / 2,
+                        child: IgnorePointer(
+                          child: SoldierSprite.of(
+                            e,
+                            bust: false,
+                            size: spr,
+                            enemy: true,
+                          ),
+                        ),
+                      ),
+                    for (final so in squad)
+                      if (_placed.containsKey(so.id))
+                        Positioned(
+                          left: _placed[so.id]!.x * scale - spr / 2,
+                          top: _placed[so.id]!.y * scale - spr / 2,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _selected = so.id),
+                            onPanStart: (_) =>
+                                setState(() => _selected = so.id),
+                            onPanUpdate: (u) => setState(() {
+                              final p = _placed[so.id]!;
+                              _placed[so.id] = clampToDeployZone(
+                                p.x + u.delta.dx / scale,
+                                p.y + u.delta.dy / scale,
+                              );
+                            }),
+                            onDoubleTap: () =>
+                                setState(() => _placed.remove(so.id)),
+                            child: Semantics(
+                              label: 'Quân ta ${so.name}',
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: _selected == so.id
+                                      ? Border.all(
+                                          color: Pal.goldLight,
+                                          width: 2,
+                                        )
+                                      : null,
+                                ),
+                                child: SoldierSprite.of(
+                                  so,
+                                  bust: false,
+                                  size: spr,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _fight(BuildContext context, GameController c, List<Soldier> squad) {
+    if (_fighting) return;
+    _fighting = true;
     final ExpeditionResult r = c.sendExpedition(
       widget.locationId,
       [for (final x in squad) x.id],
@@ -380,12 +330,506 @@ class _DeployScreenState extends State<DeployScreen> {
       placement: Map<int, Pos>.of(_placed),
     );
     if (!r.result.ok) {
+      setState(() => _fighting = false);
       toast(context, r.result);
       return;
     }
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => BattleScreen(result: r)),
       (route) => route.isFirst,
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.title,
+    required this.faction,
+    required this.ally,
+    required this.allyHp,
+    required this.foe,
+    required this.foeHp,
+    required this.placed,
+    required this.onBack,
+  });
+
+  final String title, faction;
+  final int ally, allyHp, foe, foeHp, placed;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final forces = [
+      _Force(
+        key: const ValueKey('deploy-ally-force'),
+        label: 'Quân ta',
+        count: ally,
+        hp: allyHp,
+        color: Pal.moss,
+      ),
+      _Force(
+        key: const ValueKey('deploy-foe-force'),
+        label: 'Địch',
+        count: foe,
+        hp: foeHp,
+        color: Pal.blood,
+      ),
+    ];
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Triển khai • $title',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Pal.gold,
+            fontWeight: FontWeight.w900,
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          'Đối thủ: $faction',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Pal.dim, fontSize: 11),
+        ),
+      ],
+    );
+    final back = IconButton(
+      tooltip: 'Quay lại',
+      visualDensity: VisualDensity.compact,
+      onPressed: onBack,
+      icon: const Icon(Icons.arrow_back, size: 20),
+    );
+    return Container(
+      color: Pal.panel,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          // Màn hẹp: lực lượng hai phe xuống hàng riêng thay vì ép chung một hàng.
+          if (box.maxWidth < 520) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    back,
+                    Expanded(child: titleBlock),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 2),
+                  child: Row(
+                    children: [
+                      Expanded(child: forces[0]),
+                      const SizedBox(width: 8),
+                      Expanded(child: forces[1]),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              back,
+              Expanded(child: titleBlock),
+              const SizedBox(width: 6),
+              forces[0],
+              const SizedBox(width: 12),
+              forces[1],
+              const SizedBox(width: 8),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Force extends StatelessWidget {
+  const _Force({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.hp,
+    required this.color,
+  });
+  final String label;
+  final int count, hp;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.end,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        label,
+        maxLines: 1,
+        style: TextStyle(
+          color: color,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      Text(
+        '$count quân • $hp HP',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Pal.text, fontSize: 11),
+      ),
+    ],
+  );
+}
+
+/// Cột bên trái ở màn rộng: danh sách quân (cuộn) + thông tin binh sĩ đang chọn.
+class _Rail extends StatelessWidget {
+  const _Rail({
+    required this.list,
+    required this.selected,
+    required this.placed,
+    required this.onRecall,
+  });
+
+  final Widget list;
+  final Soldier? selected;
+  final bool placed;
+  final VoidCallback onRecall;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: Pal.panel.withValues(alpha: 0.96),
+    child: Column(
+      children: [
+        Expanded(child: list),
+        if (selected != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Pal.line)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SoldierStatLine(soldier: selected!),
+                if (placed)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: onRecall,
+                      icon: const Icon(Icons.undo, size: 16),
+                      label: const Text('Rút'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _NarrowInfo extends StatelessWidget {
+  const _NarrowInfo({
+    required this.soldier,
+    required this.placed,
+    required this.onRecall,
+  });
+  final Soldier soldier;
+  final bool placed;
+  final VoidCallback onRecall;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: Pal.panel,
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    child: Row(
+      children: [
+        Expanded(child: SoldierStatLine(soldier: soldier)),
+        if (placed)
+          IconButton(
+            tooltip: 'Rút khỏi vùng triển khai',
+            onPressed: onRecall,
+            icon: const Icon(Icons.undo),
+          ),
+      ],
+    ),
+  );
+}
+
+class _SquadList extends StatelessWidget {
+  const _SquadList({
+    required this.squad,
+    required this.placed,
+    required this.selected,
+    required this.horizontal,
+    required this.onSelect,
+  });
+
+  final List<Soldier> squad;
+  final Map<int, Pos> placed;
+  final int? selected;
+  final bool horizontal;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (squad.isEmpty) {
+      return const Center(
+        child: Text('Chưa có binh sĩ nào.', style: TextStyle(color: Pal.dim)),
+      );
+    }
+    return ListView.separated(
+      key: const ValueKey('deploy-squad-list'),
+      scrollDirection: horizontal ? Axis.horizontal : Axis.vertical,
+      padding: const EdgeInsets.all(6),
+      itemCount: squad.length,
+      separatorBuilder: (_, _) => const SizedBox(width: 6, height: 6),
+      itemBuilder: (_, i) {
+        final so = squad[i];
+        final tile = _SoldierTile(
+          soldier: so,
+          placed: placed.containsKey(so.id),
+          selected: selected == so.id,
+          compact: horizontal,
+          onTap: () => onSelect(so.id),
+        );
+        return LongPressDraggable<int>(
+          data: so.id,
+          dragAnchorStrategy: pointerDragAnchorStrategy,
+          onDragStarted: () => onSelect(so.id),
+          feedback: Material(
+            color: Colors.transparent,
+            child: Transform.translate(
+              offset: const Offset(-22, -22),
+              child: Opacity(
+                opacity: 0.9,
+                child: SoldierSprite.of(so, bust: false, size: 44),
+              ),
+            ),
+          ),
+          childWhenDragging: Opacity(opacity: 0.35, child: tile),
+          child: tile,
+        );
+      },
+    );
+  }
+}
+
+class _SoldierTile extends StatelessWidget {
+  const _SoldierTile({
+    required this.soldier,
+    required this.placed,
+    required this.selected,
+    required this.compact,
+    required this.onTap,
+  });
+
+  final Soldier soldier;
+  final bool placed, selected, compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final so = soldier;
+    final d = deriveStats(so);
+    final hp = startHpOf(so);
+    final bg = selected
+        ? Pal.panelRaised
+        : (placed ? Pal.panelHi : const Color(0xFFF3DDB0));
+    final fg = (placed || selected) ? Pal.text : Pal.ink;
+    final border = selected ? Pal.goldLight : (placed ? Pal.line : Pal.ink);
+    final sprite = Opacity(
+      opacity: placed ? 0.55 : 1,
+      child: SoldierSprite.of(so, size: compact ? 34 : 40),
+    );
+    final bar = Bar(
+      value: hp / d.maxHp,
+      color: hp < d.maxHp * 0.5 ? Pal.blood : Pal.moss,
+      height: 4,
+    );
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Binh sĩ ${so.name}${placed ? ', đã triển khai' : ''}',
+      child: InkWell(
+        key: ValueKey('deploy-tile-${so.id}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: compact ? 92 : null,
+          height: compact ? null : 54,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: border, width: selected ? 2.5 : 1.5),
+          ),
+          child: compact
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    sprite,
+                    Text(
+                      so.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: fg,
+                      ),
+                    ),
+                    bar,
+                  ],
+                )
+              : Row(
+                  children: [
+                    sprite,
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            so.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: fg,
+                            ),
+                          ),
+                          Text(
+                            'Cấp ${so.level} • ${d.ranged ? 'Tầm xa' : 'Cận chiến'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: placed || selected ? Pal.dim : Pal.ink,
+                            ),
+                          ),
+                          bar,
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      placed
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 18,
+                      color: placed ? Pal.moss : Pal.dim,
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionBar extends StatelessWidget {
+  const _ActionBar({
+    required this.canFight,
+    required this.lockedReason,
+    required this.placed,
+    required this.total,
+    required this.onPreset,
+    required this.onAuto,
+    required this.onClear,
+    required this.onFight,
+  });
+
+  final bool canFight;
+  final String? lockedReason;
+  final int placed, total;
+  final ValueChanged<FormationPreset> onPreset;
+  final VoidCallback onAuto;
+  final VoidCallback? onClear;
+  final VoidCallback onFight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Pal.panel,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              key: const ValueKey('deploy-actions-scroll'),
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  GameButton(
+                    label: 'Deploy Units',
+                    dense: true,
+                    icon: Icons.auto_fix_high,
+                    onPressed: onAuto,
+                  ),
+                  const SizedBox(width: 4),
+                  for (final p in FormationPreset.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Tooltip(
+                        message: formationNames[p]!,
+                        child: OutlinedButton(
+                          key: ValueKey('formation-${p.name}'),
+                          onPressed: () => onPreset(p),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(44, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            foregroundColor: Pal.text,
+                            side: const BorderSide(color: Pal.lineStrong),
+                          ),
+                          child: Text(
+                            formationNames[p]!,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    key: const ValueKey('deploy-clear'),
+                    tooltip: 'Thu hồi tất cả',
+                    onPressed: onClear,
+                    icon: const Icon(Icons.layers_clear),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              SizedBox(
+                width: 120,
+                child: GameButton(
+                  label: 'Fight!',
+                  icon: Icons.sports_martial_arts,
+                  lockedReason: canFight
+                      ? null
+                      : (lockedReason ?? 'Chưa sẵn sàng'),
+                  onPressed: onFight,
+                ),
+              ),
+              if (!canFight && lockedReason != null)
+                Text(
+                  '$placed/$total đã đặt',
+                  style: const TextStyle(color: Pal.dim, fontSize: 10),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

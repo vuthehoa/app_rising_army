@@ -165,21 +165,13 @@ void main() {
       final s = rich();
       for (var i = 0; i < 30; i++) {
         expect(
-          GameRules.buildFacility(
-            s,
-            FacilityType.storageChest,
-            GameRules.freeChestSpotIndices(s).first,
-          ).ok,
+          GameRules.buildFacility(s, FacilityType.storageChest, -1).ok,
           isTrue,
         );
       }
       expect(GameRules.chestCount(s), 30);
       expect(s.facilities.map((f) => f.id).toSet().length, 30);
       expect(GameRules.slotFacilityCount(s), 0);
-      expect(
-        GameRules.freeSlotIndices(s).length,
-        GameRules.facilitySlots.length - 1,
-      );
       for (final f in s.facilities) {
         expect(f.x, inInclusiveRange(0, 1));
         expect(f.y, inInclusiveRange(0, 1));
@@ -198,16 +190,8 @@ void main() {
     test('mỗi hòm tăng sức chứa đúng một lần; save/load không tăng lặp', () {
       final s = rich();
       final base = GameRules.inventoryCapacity(s);
-      GameRules.buildFacility(
-        s,
-        FacilityType.storageChest,
-        GameRules.freeChestSpotIndices(s).first,
-      );
-      GameRules.buildFacility(
-        s,
-        FacilityType.storageChest,
-        GameRules.freeChestSpotIndices(s).first,
-      );
+      GameRules.buildFacility(s, FacilityType.storageChest, -1);
+      GameRules.buildFacility(s, FacilityType.storageChest, -1);
       expect(GameRules.inventoryCapacity(s), base + 2 * chestInventoryBonus);
       final loaded = GameState.fromJson(
         jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>,
@@ -231,11 +215,7 @@ void main() {
     test('xây hòm không mất vật phẩm; mua tuân theo giới hạn sức chứa mới', () {
       final s = rich();
       final items = Map.of(s.inventory);
-      GameRules.buildFacility(
-        s,
-        FacilityType.storageChest,
-        GameRules.freeChestSpotIndices(s).first,
-      );
+      GameRules.buildFacility(s, FacilityType.storageChest, -1);
       expect(s.inventory, items);
       // Đầy kho đến sát giới hạn cơ bản, rồi hòm mở thêm chỗ.
       s.inventory['padded_armor'] =
@@ -243,11 +223,7 @@ void main() {
           GameRules.inventoryCount(s) +
           s.inventory['padded_armor']!;
       expect(GameRules.inventoryCount(s), GameRules.inventoryCapacity(s));
-      GameRules.buildFacility(
-        s,
-        FacilityType.storageChest,
-        GameRules.freeChestSpotIndices(s).first,
-      );
+      GameRules.buildFacility(s, FacilityType.storageChest, -1);
       expect(
         GameRules.inventoryCapacity(s) - GameRules.inventoryCount(s),
         chestInventoryBonus,
@@ -259,11 +235,7 @@ void main() {
       s.res[Res.coins] = 999;
       final before = Map.of(s.res);
       expect(
-        GameRules.buildFacility(
-          s,
-          FacilityType.storageChest,
-          GameRules.freeChestSpotIndices(s).first,
-        ).ok,
+        GameRules.buildFacility(s, FacilityType.storageChest, -1).ok,
         isFalse,
       );
       expect(s.res, before);
@@ -364,10 +336,7 @@ void main() {
         expect(c.placing, FacilityType.storageChest);
         expect(GameRules.chestCount(c.state!), 0);
         expect(GameRules.inventoryCapacity(c.state!), cap);
-        expect(
-          c.confirmPlacement(GameRules.freeChestSpotIndices(c.state!).first).ok,
-          isTrue,
-        );
+        expect(c.confirmPlacement(-1).ok, isTrue);
         await tester.pumpAndSettle();
         expect(
           GameRules.inventoryCapacity(c.state!),

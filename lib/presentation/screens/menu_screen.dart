@@ -1,9 +1,9 @@
+import 'package:app_rising_army/presentation/widgets/buildings/camp_scene/camp_painter.dart';
 import 'package:flutter/material.dart';
 
 import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../data/save_repository.dart';
-import '../widgets/art.dart';
 import '../widgets/common.dart';
 import 'new_game_nav.dart';
 

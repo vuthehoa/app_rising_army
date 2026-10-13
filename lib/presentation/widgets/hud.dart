@@ -16,7 +16,6 @@ class Hud extends StatelessWidget {
     final c = ControllerScope.of(context);
     final s = c.state!;
     final d = Dims(context);
-    final morale = s.armyMorale;
     return Container(
       height: d.compact ? 38 : 44,
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -62,36 +61,7 @@ class Hud extends StatelessWidget {
                 ),
               ),
             ),
-          const SizedBox(width: 6),
-          Tooltip(
-            message: 'Tinh thần quân đội ${morale.round()}/100',
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  morale >= 60
-                      ? Icons.sentiment_satisfied
-                      : (morale >= 35
-                            ? Icons.sentiment_neutral
-                            : Icons.sentiment_very_dissatisfied),
-                  size: 17,
-                  color: morale >= 60
-                      ? Pal.moss
-                      : (morale >= 35 ? Pal.gold : Pal.blood),
-                ),
-                const SizedBox(width: 3),
-                SizedBox(
-                  width: d.compact ? 34 : 50,
-                  child: Bar(
-                    value: morale / 100,
-                    color: morale >= 60
-                        ? Pal.moss
-                        : (morale >= 35 ? Pal.gold : Pal.blood),
-                  ),
-                ),
-              ],
-            ),
-          ),
+
           const SizedBox(width: 8),
           Tooltip(
             message:

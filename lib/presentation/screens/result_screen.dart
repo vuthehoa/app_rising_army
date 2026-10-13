@@ -207,19 +207,32 @@ class ResultScreen extends StatelessWidget {
           child: Column(
             children: [
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: SingleChildScrollView(child: summary),
-                    ),
-                    SizedBox(width: d.gap),
-                    Expanded(
-                      flex: 5,
-                      child: SingleChildScrollView(child: losses),
-                    ),
-                  ],
+                child: LayoutBuilder(
+                  builder: (context, box) => box.maxWidth < 560
+                      // Màn hẹp: một cột cuộn duy nhất thay vì hai cột bị ép.
+                      ? SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              summary,
+                              SizedBox(height: d.gap),
+                              losses,
+                            ],
+                          ),
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              flex: 4,
+                              child: SingleChildScrollView(child: summary),
+                            ),
+                            SizedBox(width: d.gap),
+                            Expanded(
+                              flex: 5,
+                              child: SingleChildScrollView(child: losses),
+                            ),
+                          ],
+                        ),
                 ),
               ),
               SizedBox(height: d.gap),

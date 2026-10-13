@@ -2,6 +2,8 @@ import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
+import 'package:app_rising_army/domain/world_data.dart';
+import 'package:app_rising_army/domain/world_map.dart';
 import 'package:app_rising_army/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -42,13 +44,18 @@ Future<void> tapText(WidgetTester tester, String text, {int index = 0}) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> toCity(WidgetTester tester) async {
+/// Chạm thị trấn: nhân vật tự đi tới tâm và tự vào thành (không bấm thêm).
+Future<void> toCity(WidgetTester tester, GameController c) async {
   await tapText(tester, 'Bản đồ');
-  await tester.tap(find.bySemanticsLabel('Thị trấn Đá Xám'));
+  final town = worldMap.townById('g_town')!;
+  c.state!.hero.position = WPoint(town.position.x + 70, town.position.y);
+  c.commitTravel();
   await tester.pumpAndSettle();
-  await tapText(tester, 'Hành quân tới thành phố');
-  await tapText(tester, 'Tự chọn');
-  await tapText(tester, 'Xuất quân');
+  await tester.tap(find.byKey(const ValueKey('town-marker-g_town')));
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  await tester.pumpAndSettle(); // tới tâm thị trấn thì tự vào thành
 }
 
 void main() {
@@ -56,10 +63,8 @@ void main() {
     'luồng: bản đồ → hành quân → thành phố → người bán → mua & trang bị → so sánh → về bản đồ',
     (tester) async {
       final c = await boot(tester, const Size(932, 430));
-      final day = c.state!.day;
-      await toCity(tester);
+      await toCity(tester, c);
       expect(c.state!.visiting, 'g_town');
-      expect(c.state!.day, day + 1); // hành quân tốn 1 ngày
       expect(find.text('Thị trấn Đá Xám'), findsWidgets);
 
       await tapText(tester, 'Thợ may giáp');
@@ -80,7 +85,10 @@ void main() {
       await tester.pumpAndSettle();
       await tapText(tester, 'Rời thành phố, về bản đồ');
       expect(c.state!.visiting, isNull);
-      expect(find.text('TRINH SÁT'), findsOneWidget); // đang ở tab bản đồ
+      expect(
+        find.byKey(const ValueKey('map-surface')),
+        findsOneWidget,
+      ); // đang ở tab bản đồ
     },
   );
 
@@ -88,7 +96,7 @@ void main() {
     'mua rồi bán lại trong UI; hết hàng hiện khóa; người bán khóa theo tiến trình hiển thị Đóng cửa',
     (tester) async {
       final c = await boot(tester, const Size(932, 430));
-      await toCity(tester);
+      await toCity(tester, c);
       await tapText(tester, 'Chợ vật tư');
       await tapText(tester, 'Bán');
       expect(
@@ -105,7 +113,7 @@ void main() {
     (tester) async {
       final store = MemoryStore();
       final c1 = await boot(tester, const Size(932, 430), store: store);
-      await toCity(tester);
+      await toCity(tester, c1);
       await tapText(tester, 'Thợ rèn Đá Xám');
       await tapText(tester, 'Giáo gỗ');
       await tapText(tester, 'Mua 1');
@@ -138,7 +146,7 @@ void main() {
       (tester) async {
         final c = await boot(tester, size);
         c.state!.inventory['padded_armor'] = 3;
-        await toCity(tester);
+        await toCity(tester, c);
         expect(tester.takeException(), isNull);
         for (final stall in ['Thợ rèn Đá Xám', 'Thợ may giáp', 'Chợ vật tư']) {
           await tapText(tester, stall);

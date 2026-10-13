@@ -1,27 +1,45 @@
 import 'dart:math';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../application/game_controller.dart';
 import '../../../core/theme.dart';
+import '../../../domain/camp_layout.dart';
 import '../../../domain/catalog.dart';
 import '../../../domain/models.dart';
 import '../../../domain/rules.dart';
 import '../../screens/shell.dart';
+import '../quest_panel.dart';
 import 'camp_chrome.dart';
 import 'camp_facility_view.dart';
 import 'camp_soldier_token.dart';
 
-/// Kích thước dùng chung cho các lớp của cảnh trại, tính một lần từ khung hiện tại.
+/// Kích thước dùng chung cho các lớp của cảnh trại, tính từ khung THẾ GIỚI (tỉ lệ cố định
+/// [CampLayout.aspect], đặt vừa vùng nhìn). Kích thước công trình = footprint chuẩn hóa × khung thế giới,
+/// nên 4 cột × 3 hàng luôn vừa đất xây ở zoom mặc định và giống nhau trên mọi thiết bị.
 class CampMetrics {
   CampMetrics(this.size)
-    : scale = (size.height / 340).clamp(0.62, 1.2),
-      facilityW = 150.0 * (size.height / 340).clamp(0.62, 1.2),
-      facilityH = 104.0 * (size.height / 340).clamp(0.62, 1.2),
-      sprite = 34.0 * (size.height / 340).clamp(0.62, 1.2).clamp(0.8, 1.1);
+    : facilityW = CampLayout.buildingW * size.width,
+      facilityH = CampLayout.buildingH * size.height,
+      chestW = CampLayout.chestW * size.width,
+      chestH = CampLayout.chestH * size.height,
+      sprite = (size.height * 0.065).clamp(22.0, 46.0);
+
+  /// Khung thế giới lớn nhất có tỉ lệ [CampLayout.aspect] nằm gọn trong vùng nhìn.
+  static Size worldFor(Size viewport) {
+    final w = math.min(viewport.width, viewport.height * CampLayout.aspect);
+    return Size(w, w / CampLayout.aspect);
+  }
+
+  /// Góc trên-trái của khung thế giới trong vùng nhìn (căn giữa).
+  static Offset originFor(Size viewport, Size world) => Offset(
+    (viewport.width - world.width) / 2,
+    (viewport.height - world.height) / 2,
+  );
 
   final Size size;
-  final double scale, facilityW, facilityH, sprite;
+  final double facilityW, facilityH, chestW, chestH, sprite;
 }
 
 /// Các công trình đã xây và bếp lửa trang trí.
@@ -37,22 +55,24 @@ class CampFacilitiesLayer extends StatelessWidget {
   final GameController controller;
   final CampMetrics metrics;
 
-  /// Công trình đặt ô chiếm cả ô; Hòm đồ nhỏ hơn và xếp ở khu chứa riêng.
   Widget _placed(Facility f) {
     final m = metrics;
-    final small = !facilityDefs[f.type]!.usesSlot;
-    final w = small ? m.facilityW * 0.34 : m.facilityW;
-    final h = small ? m.facilityH * 0.46 : m.facilityH;
+    final (fw, fh) = CampLayout.footprintOf(f.type);
+    final w = fw * m.size.width, h = fh * m.size.height;
     return Positioned(
       key: ValueKey('facility-${f.id}'),
       left: f.x * m.size.width - w / 2,
       top: f.y * m.size.height - h / 2,
       width: w,
       height: h,
-      child: CampFacilityView(
-        facility: f,
-        state: state,
-        controller: controller,
+      child: Opacity(
+        opacity: controller.movingId == f.id ? 0.35 : 1,
+        child: CampFacilityView(
+          facility: f,
+          state: state,
+          controller: controller,
+          worldSize: m.size,
+        ),
       ),
     );
   }
@@ -62,10 +82,11 @@ class CampFacilitiesLayer extends StatelessWidget {
     final m = metrics;
     return Stack(
       children: [
-        // Bếp lửa: hình trang trí cố định, không phải công trình.
+        // Bếp lửa: hình trang trí ở giữa hàng giữa, cùng kích thước một công trình, vùng bảo vệ không xây đè.
         Positioned(
-          left: GameRules.campfireSpot.$1 * m.size.width - m.facilityW / 2,
-          top: GameRules.campfireSpot.$2 * m.size.height - m.facilityH / 2,
+          key: const ValueKey('campfire'),
+          left: CampLayout.campfire.$1 * m.size.width - m.facilityW / 2,
+          top: CampLayout.campfire.$2 * m.size.height - m.facilityH / 2,
           width: m.facilityW,
           height: m.facilityH,
           child: const CampCampfireDecor(),
@@ -98,6 +119,12 @@ class CampSoldiersLayer extends StatelessWidget {
     );
   }
 
+  /// Vị trí người chơi đã đặt (nếu có) thắng vị trí tự đi lại theo ngày.
+  static Offset _spotOf(Soldier so, int day, Size size) =>
+      so.campX != null && so.campY != null
+      ? Offset(so.campX! * size.width, so.campY! * size.height)
+      : idleSpot(so.id, day, size);
+
   @override
   Widget build(BuildContext context) {
     final s = state;
@@ -110,12 +137,12 @@ class CampSoldiersLayer extends StatelessWidget {
           for (var i = 0; i < f.assigned.length; i++)
             if (s.soldier(f.assigned[i]) != null)
               Positioned(
+                // Lính đứng thành hàng ngay dưới công trình, cách nhau theo kích thước lính.
                 left:
-                    f.x * m.size.width -
-                    m.facilityW / 2 +
-                    m.facilityW * (0.2 + 0.3 * i) -
+                    f.x * m.size.width +
+                    (i - (f.assigned.length - 1) / 2) * m.sprite * 0.85 -
                     m.sprite / 2,
-                top: f.y * m.size.height + m.facilityH * 0.18,
+                top: f.y * m.size.height + m.facilityH * 0.32,
                 child: CampSoldierToken(
                   soldier: s.soldier(f.assigned[i])!,
                   size: m.sprite,
@@ -129,8 +156,8 @@ class CampSoldiersLayer extends StatelessWidget {
               key: ValueKey('idle-${so.id}'),
               duration: const Duration(milliseconds: 900),
               curve: Curves.easeInOut,
-              left: idleSpot(so.id, s.day, m.size).dx - m.sprite / 2,
-              top: idleSpot(so.id, s.day, m.size).dy - m.sprite / 2,
+              left: _spotOf(so, s.day, m.size).dx - m.sprite / 2,
+              top: _spotOf(so, s.day, m.size).dy - m.sprite / 2,
               child: CampSoldierToken(
                 soldier: so,
                 size: m.sprite,
@@ -142,93 +169,56 @@ class CampSoldiersLayer extends StatelessWidget {
   }
 }
 
-/// Ô vàng chọn vị trí đặt công trình và dòng hướng dẫn khi đang ở chế độ Build.
-/// Vị trí lấy từ [GameRules.placementIndices] (ô công trình, hoặc vị trí Hòm đồ); chạm một vị trí gọi
-/// [onPlace]; việc xây thật do bên gọi (CampHub → controller → luật) thực hiện.
-class CampPlacementOverlay extends StatelessWidget {
-  const CampPlacementOverlay({
+/// Dòng hướng dẫn khi đang chọn vị trí đặt công trình. Là lớp GIAO DIỆN cố định trên màn hình
+/// (không zoom cùng thế giới Trại).
+class CampPlacementHint extends StatelessWidget {
+  const CampPlacementHint({
     super.key,
-    required this.state,
-    required this.metrics,
     required this.placing,
-    required this.onPlace,
-    required this.onCancel,
+    this.moving = false,
   });
 
-  final GameState state;
-  final CampMetrics metrics;
   final FacilityType placing;
-  final void Function(int index) onPlace;
-  final VoidCallback onCancel;
+
+  /// true: đang dời công trình đã có (không phải xây mới).
+  final bool moving;
 
   @override
   Widget build(BuildContext context) {
-    final m = metrics;
     final def = facilityDefs[placing]!;
-    final spots = GameRules.placementIndices(state, placing);
-    final small = !def.usesSlot;
-    final w = small ? m.facilityW * 0.34 : m.facilityW;
-    final h = small ? m.facilityH * 0.46 : m.facilityH;
-    return Stack(
-      children: [
-        for (final i in spots)
-          () {
-            final p = small
-                ? GameRules.chestSpot(i)
-                : GameRules.facilitySlots[i];
-            return Positioned(
-              key: ValueKey('placement-$i'),
-              left: p.$1 * m.size.width - w / 2,
-              top: p.$2 * m.size.height - h / 2,
-              width: w,
-              height: h,
-              child: GestureDetector(
-                onTap: () => onPlace(i),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Pal.gold.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Pal.gold, width: 2),
-                  ),
-                  alignment: Alignment.center,
-                  child: small
-                      ? const Icon(Icons.add, size: 16, color: Pal.ink)
-                      : Text(
-                          'Đặt ${def.name}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Pal.ink,
-                          ),
-                        ),
+    // Chỉ là dòng hướng dẫn: không được chắn chạm vào các ô đặt công trình bên dưới.
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            top: 48, // dưới Top HUD (nằm trên dải hàng rào phía trên)
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
                 ),
-              ),
-            );
-          }(),
-        Positioned(
-          top: 8,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Pal.bg.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Pal.gold),
-              ),
-              child: Text(
-                'Chạm một ô vàng để đặt ${def.name}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+                decoration: BoxDecoration(
+                  color: Pal.bg.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Pal.gold),
+                ),
+                child: Text(
+                  moving
+                      ? 'Kéo ${def.name} tới vị trí xanh rồi thả để dời'
+                      : 'Kéo ${def.name} tới vị trí xanh rồi thả để xây',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -244,15 +234,7 @@ class CampHud extends StatelessWidget {
     final s = state;
     return Stack(
       children: [
-        Positioned(
-          left: 8,
-          top: 8,
-          child: CampBadge(
-            icon: Icons.groups,
-            text: '${s.roster.length}/${GameRules.rosterCap(s)}',
-            tip: 'Số binh sĩ / sức chứa',
-          ),
-        ),
+        // Quân số hiển thị trên lá cờ ở Top HUD (GameTopHud) nên không lặp lại ở đây.
         Positioned(
           left: 8,
           bottom: 8,
@@ -270,7 +252,7 @@ class CampHud extends StatelessWidget {
             icon: Icons.menu_book,
             text: '${GameRules.byStatus(s, MissionStatus.active).length}',
             tip: 'Nhật ký (journal): nhiệm vụ đang làm',
-            onTap: () => ShellNav.of(context).go(Sections.missions),
+            onTap: () => showQuestPanel(context),
           ),
         ),
       ],
@@ -285,42 +267,225 @@ class CampActionBar extends StatelessWidget {
     required this.placing,
     required this.onBuild,
     required this.onCancel,
+    required this.onNextDay,
   });
 
-  /// true khi đang chọn ô đặt công trình (nút build thành "hủy").
   final bool placing;
   final VoidCallback onBuild;
   final VoidCallback onCancel;
+  final VoidCallback onNextDay;
+
+  static const Color _darkGold = Color(0xFF8C6324);
 
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      left: 0,
-      right: 0,
+      left: 12,
+      right: 12,
       bottom: 6,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF3DDB0),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Pal.ink, width: 2),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 58,
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            clipBehavior: Clip.none,
             children: [
-              CampBarButton(
-                icon: Icons.hardware,
-                label: placing ? 'hủy' : 'build',
-                onTap: placing ? onCancel : onBuild,
+              // Thanh nền.
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 42,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      // Xây: kích thước nhỏ gọn.
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: _CompactCampActionButton(
+                            icon: placing
+                                ? Icons.close_rounded
+                                : Icons.hardware,
+                            label: placing ? 'Hủy' : 'Xây',
+                            onTap: placing ? onCancel : onBuild,
+                          ),
+                        ),
+                      ),
+
+                      // Khoảng cách hai bên nút Qua Ngày bằng nhau.
+                      const SizedBox(width: 48),
+
+                      // Bản đồ: đối xứng với nút Xây.
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _CompactCampActionButton(
+                            icon: Icons.map_outlined,
+                            label: 'Bản đồ',
+                            onTap: () {
+                              ShellNav.of(context).go(Sections.map);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(width: 6),
-              CampBarButton(
-                icon: Icons.map,
-                label: 'map',
-                onTap: () => ShellNav.of(context).go(Sections.map),
+
+              // Nút Qua Ngày chính giữa.
+              Positioned(
+                bottom: 0,
+                child: GestureDetector(
+                  onTap: onNextDay,
+                  behavior: HitTestBehavior.opaque,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      clipBehavior: Clip.none,
+                      children: [
+                        // Huy hiệu tròn 44 x 44.
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFFFFF9E9),
+                                Color(0xFFE7C681),
+                                Color(0xFFC99A45),
+                              ],
+                            ),
+                            border: Border.all(color: _darkGold, width: 2),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x44000000),
+                                blurRadius: 3,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.campaign_rounded,
+                              size: 25,
+                              color: Color(0xFF8C6324),
+                            ),
+                          ),
+                        ),
+
+                        // Nhãn thu nhỏ, chiều ngang xấp xỉ đường kính nút.
+                        Positioned(
+                          top: -3,
+                          child: Container(
+                            width: 42,
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 1,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF0D0),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: _darkGold, width: 0.8),
+                            ),
+                            child: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Qua Ngày',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  color: Color(0xFF493321),
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Nút hành động nhỏ dành riêng cho thanh điều khiển doanh trại.
+class _CompactCampActionButton extends StatelessWidget {
+  const _CompactCampActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  static const Color _darkGold = Color(0xFF8C6324);
+  static const Color _darkInk = Color(0xFF493321);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFFF8E7), Color(0xFFF1D9A8), Color(0xFFE3C181)],
+          ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _darkGold, width: 1),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 2,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: const Color(0xFF65451F)),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: const TextStyle(
+                    color: _darkInk,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

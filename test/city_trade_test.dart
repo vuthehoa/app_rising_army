@@ -124,7 +124,7 @@ void main() {
         final s = fresh();
         s.missions.clear();
         s.missions.add(Mission(id: 800, templateId: 'visit_town'));
-        GameRules.acceptMission(s, 800);
+        GameRules.acceptMission(s..visiting ??= 'g_town', 800);
         final m = s.missions.first;
         expect(GameRules.missionReady(s, m), isFalse);
         final r = GameRules.sendExpedition(s, 'g_town', squad(s, 2), {});
@@ -140,7 +140,7 @@ void main() {
       final s = inCity('g_town', coins: 2000);
       s.missions.clear();
       s.missions.add(Mission(id: 801, templateId: 'gear_a'));
-      GameRules.acceptMission(s, 801);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 801);
       final m = s.missions.first;
       for (final so in s.roster) {
         so.armorId = 'padded_armor'; // giáp 2 < 3

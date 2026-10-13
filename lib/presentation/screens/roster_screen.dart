@@ -4,10 +4,12 @@ import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
+import '../../domain/progression.dart';
 import '../../domain/rules.dart';
 import '../../domain/stats.dart';
 import '../widgets/art.dart';
 import '../widgets/common.dart';
+import '../widgets/progression_panels.dart';
 
 class RosterScreen extends StatefulWidget {
   const RosterScreen({super.key});
@@ -250,13 +252,54 @@ class _Detail extends StatelessWidget {
     final header = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          decoration: BoxDecoration(
-            color: Pal.ink,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Pal.goldDim, width: 2),
+        SizedBox(
+          width: d.compact ? 96 : 124,
+          child: Column(
+            key: const ValueKey('soldier-portrait-column'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: Pal.ink,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Pal.goldDim, width: 2),
+                ),
+                child: Center(
+                  child: SoldierSprite.of(so, size: d.compact ? 84 : 110),
+                ),
+              ),
+              const SizedBox(height: 4),
+              // Cấp độ và EXP nằm ngay dưới ảnh; dữ liệu thật từ Soldier.level/xp và xpForNext.
+              Text(
+                'Cấp ${so.level}',
+                key: const ValueKey('soldier-level'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Pal.gold,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Bar(
+                key: const ValueKey('soldier-exp-bar'),
+                value: so.level >= maxSoldierLevel
+                    ? 1
+                    : so.xp / xpForNext(so.level),
+                color: Pal.gold,
+                height: 8,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                so.level >= maxSoldierLevel
+                    ? 'EXP tối đa'
+                    : 'EXP ${so.xp}/${xpForNext(so.level)}',
+                key: const ValueKey('soldier-exp-text'),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
-          child: SoldierSprite.of(so, size: d.compact ? 84 : 110),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -282,7 +325,7 @@ class _Detail extends StatelessWidget {
                 ],
               ),
               Text(
-                '${roleNames[so.role]} • Cấp ${so.level}',
+                roleNames[so.role]!,
                 style: const TextStyle(
                   color: Pal.gold,
                   fontWeight: FontWeight.w700,
@@ -302,11 +345,6 @@ class _Detail extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                'Kinh nghiệm ${so.xp}/${xpForNext(so.level)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              Bar(value: so.xp / xpForNext(so.level), color: Pal.gold),
               const SizedBox(height: 3),
               Text(
                 'Tinh thần ${so.morale}',
@@ -374,6 +412,14 @@ class _Detail extends StatelessWidget {
                 _kv('Tốc độ', '${dv.speed.toStringAsFixed(1)} m/s'),
                 _kv('Chu kỳ đánh', '${dv.interval.toStringAsFixed(1)} s'),
                 _kv('Chính xác', '${(dv.accuracy * 100).round()}%'),
+                _kv('Chí mạng', '${(dv.crit * 100).round()}%'),
+                _kv('Xuyên giáp', '${dv.armorPen}'),
+                _kv(
+                  'Vũ khí',
+                  dv.weaponType == null
+                      ? 'Tay không'
+                      : weaponProfiles[dv.weaponType]!.name,
+                ),
               ],
             ),
           ),
@@ -385,7 +431,8 @@ class _Detail extends StatelessWidget {
       title: 'Trang bị',
       child: Row(
         children: [
-          for (final slot in Slot.values)
+          // Phụ kiện (bùa, nhẫn…) không hiển thị ở màn hình này.
+          for (final slot in Slot.values.where((x) => x != Slot.accessory))
             Expanded(
               child: InkWell(
                 onTap: () => showEquipDialog(context, controller, so, slot),
@@ -459,7 +506,7 @@ class _Detail extends StatelessWidget {
             ),
           const SizedBox(height: 4),
           Text(
-            'HP ${so.hp}/${dv.maxHp}. Kéo binh sĩ vào công trình ở màn Trại, hoặc chọn bên dưới. Mỗi công trình tối đa ${Facility.capacity} người.',
+            'HP ${so.hp}/${dv.maxHp}. Kéo binh sĩ vào công trình ở màn Trại, hoặc chọn bên dưới. Mỗi công trình tối đa ${Facility.capacity} người (6 sau khi nâng cấp).',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 6),
@@ -473,10 +520,10 @@ class _Detail extends StatelessWidget {
                 GameButton(
                   dense: true,
                   label:
-                      '${facilityDefs[f.type]!.name} ${f.assigned.length}/${Facility.capacity}',
+                      '${facilityDefs[f.type]!.name} ${f.assigned.length}/${f.slots}',
                   lockedReason: f.assigned.contains(so.id)
                       ? 'Đang ở đây'
-                      : (f.assigned.length >= Facility.capacity ? 'Đầy' : null),
+                      : (f.assigned.length >= f.slots ? 'Đầy' : null),
                   onPressed: () =>
                       toast(context, controller.assignToFacility(so.id, f.id)),
                 ),
@@ -492,6 +539,9 @@ class _Detail extends StatelessWidget {
         ],
       ),
     );
+
+    final mastery = MasteryPanel(soldier: so, equipped: dv.weaponType);
+    final skills = SkillsPanel(soldier: so, controller: controller);
 
     return LayoutBuilder(
       builder: (context, box) {
@@ -517,6 +567,10 @@ class _Detail extends StatelessWidget {
                           gear,
                           SizedBox(height: d.gap),
                           train,
+                          SizedBox(height: d.gap),
+                          mastery,
+                          SizedBox(height: d.gap),
+                          skills,
                         ],
                       ),
                     ),
@@ -531,6 +585,10 @@ class _Detail extends StatelessWidget {
                     gear,
                     SizedBox(height: d.gap),
                     train,
+                    SizedBox(height: d.gap),
+                    mastery,
+                    SizedBox(height: d.gap),
+                    skills,
                   ],
                 ),
         );
@@ -542,7 +600,14 @@ class _Detail extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 1.5),
     child: Row(
       children: [
-        Expanded(child: Text(k, style: const TextStyle(fontSize: 12))),
+        Expanded(
+          child: Text(
+            k,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
         Text(v, style: const TextStyle(fontWeight: FontWeight.w800)),
       ],
     ),
@@ -610,6 +675,8 @@ class _EquipDialog extends StatefulWidget {
 
 class _EquipDialogState extends State<_EquipDialog> {
   String? _pick;
+  WeaponType? _type; // lọc nhóm vũ khí (chỉ ô Vũ khí)
+  int _sort = 0; // 0 phẩm cấp, 1 tên, 2 chỉ số chính
 
   @override
   Widget build(BuildContext context) {
@@ -620,12 +687,20 @@ class _EquipDialogState extends State<_EquipDialog> {
     final items =
         [
           for (final e in s.inventory.entries)
-            if (e.value > 0 && itemDefs[e.key]!.slot == slot) itemDefs[e.key]!,
-        ]..sort(
-          (a, b) => a.tier != b.tier
+            if (e.value > 0 &&
+                itemDefs[e.key]!.slot == slot &&
+                (_type == null || itemDefs[e.key]!.weaponType == _type))
+              itemDefs[e.key]!,
+        ]..sort((a, b) {
+          if (_sort == 1) return a.name.compareTo(b.name);
+          if (_sort == 2) {
+            final c = (b.damage + b.defense).compareTo(a.damage + a.defense);
+            if (c != 0) return c;
+          }
+          return a.tier != b.tier
               ? a.tier.compareTo(b.tier)
-              : a.name.compareTo(b.name),
-        );
+              : a.name.compareTo(b.name);
+        });
     final cur = so.equipped(slot);
     final before = deriveStats(so);
     final pick = _pick == null ? null : itemDefs[_pick];
@@ -710,45 +785,92 @@ class _EquipDialogState extends State<_EquipDialog> {
                   children: [
                     Expanded(
                       flex: 5,
-                      child: items.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'Kho không có vật phẩm phù hợp. Mua ở Lò rèn hoặc nhận từ nhiệm vụ.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Pal.dim),
-                              ),
-                            )
-                          : ListView(
-                              shrinkWrap: true,
-                              children: [
-                                for (final it in items)
-                                  ListTile(
-                                    dense: true,
-                                    selected: _pick == it.id,
-                                    selectedTileColor: Pal.panelHi,
-                                    leading: ItemGlyph(it.id, size: 34),
-                                    title: Text(
-                                      '${it.name} ×${s.inventory[it.id]}',
-                                      style: TextStyle(
-                                        fontSize: 12.5,
-                                        color: equipProblem(so, it) == null
-                                            ? Pal.text
-                                            : Pal.dim,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      equipProblem(so, it) ?? _itemLine(it),
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        color: equipProblem(so, it) == null
-                                            ? Pal.dim
-                                            : Pal.blood,
-                                      ),
-                                    ),
-                                    onTap: () => setState(() => _pick = it.id),
+                      child: Column(
+                        children: [
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 2,
+                            children: [
+                              if (slot == Slot.weapon) ...[
+                                ChoiceChip(
+                                  label: const Text('Tất cả'),
+                                  visualDensity: VisualDensity.compact,
+                                  selected: _type == null,
+                                  onSelected: (_) =>
+                                      setState(() => _type = null),
+                                ),
+                                for (final t in WeaponType.values)
+                                  ChoiceChip(
+                                    key: ValueKey('equip-filter-${t.name}'),
+                                    label: Text(weaponProfiles[t]!.name),
+                                    visualDensity: VisualDensity.compact,
+                                    selected: _type == t,
+                                    onSelected: (_) =>
+                                        setState(() => _type = t),
                                   ),
                               ],
-                            ),
+                              ActionChip(
+                                key: const ValueKey('equip-sort'),
+                                label: Text(
+                                  const [
+                                    'Xếp: phẩm cấp',
+                                    'Xếp: tên',
+                                    'Xếp: chỉ số',
+                                  ][_sort],
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () =>
+                                    setState(() => _sort = (_sort + 1) % 3),
+                              ),
+                            ],
+                          ),
+                          Expanded(
+                            child: items.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      'Kho không có vật phẩm phù hợp. Mua ở Lò rèn hoặc nhận từ nhiệm vụ.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Pal.dim),
+                                    ),
+                                  )
+                                : ListView(
+                                    shrinkWrap: true,
+                                    children: [
+                                      for (final it in items)
+                                        ListTile(
+                                          dense: true,
+                                          selected: _pick == it.id,
+                                          selectedTileColor: Pal.panelHi,
+                                          leading: ItemGlyph(it.id, size: 34),
+                                          title: Text(
+                                            '${it.name} ×${s.inventory[it.id]}',
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              color:
+                                                  equipProblem(so, it) == null
+                                                  ? Pal.text
+                                                  : Pal.dim,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            equipProblem(so, it) ??
+                                                _itemLine(it),
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              color:
+                                                  equipProblem(so, it) == null
+                                                  ? Pal.dim
+                                                  : Pal.blood,
+                                            ),
+                                          ),
+                                          onTap: () =>
+                                              setState(() => _pick = it.id),
+                                        ),
+                                    ],
+                                  ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -793,6 +915,28 @@ class _EquipDialogState extends State<_EquipDialog> {
                               'Chính xác',
                               before.accuracy * 100,
                               after.accuracy * 100,
+                              suffix: '%',
+                            ),
+                            row(
+                              'Chu kỳ đánh',
+                              before.interval,
+                              after.interval,
+                              digits: 1,
+                              suffix: ' s',
+                              lowerBetter: true,
+                            ),
+                            row(
+                              'Tầm đánh',
+                              before.range,
+                              after.range,
+                              digits: 1,
+                              suffix: ' m',
+                            ),
+                            row('Xuyên giáp', before.armorPen, after.armorPen),
+                            row(
+                              'Chí mạng',
+                              before.crit * 100,
+                              after.crit * 100,
                               suffix: '%',
                             ),
                             const SizedBox(height: 8),
@@ -847,8 +991,13 @@ class _EquipDialogState extends State<_EquipDialog> {
 
   String _itemLine(ItemDef it) {
     final parts = <String>[
+      if (it.weaponType != null) weaponProfiles[it.weaponType]!.name,
+      'Phẩm ${it.tier}',
       if (it.damage > 0) 'Công +${it.damage}',
       if (it.defense > 0) 'Giáp +${it.defense}',
+      if (it.weaponType != null)
+        '${it.interval.toStringAsFixed(1)}s • ${it.range.toStringAsFixed(1)}m',
+      if (it.totalArmorPen > 0) 'Xuyên ${it.totalArmorPen}',
       if (it.speed != 0) 'Tốc ${it.speed > 0 ? '+' : ''}${it.speed}',
       for (final b in it.bonus.entries) '${statNames[b.key]} +${b.value}',
     ];

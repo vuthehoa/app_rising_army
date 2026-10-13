@@ -205,7 +205,10 @@ BattleReport simulateBattle(
                 u.d.moraleMult *
                 damageScale;
             if (crit) raw *= 1.5;
-            dmg = max(1, (raw * (1 - best.d.reduction)).round());
+            dmg = max(
+              1,
+              (raw * (1 - best.d.reductionVs(u.d.armorPen))).round(),
+            );
             best.hp -= dmg;
             if (!best.alive) {
               u.kills++;

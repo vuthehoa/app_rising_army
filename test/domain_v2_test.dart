@@ -147,30 +147,35 @@ void main() {
       expect(GameRules.unequip(s, so.id, Slot.accessory).ok, isFalse);
     });
 
-    test('equip: kiểm tra vai trò, cấp độ và sức mạnh yêu cầu', () {
-      final s = fresh();
-      s.inventory.addAll({'hunting_bow': 1, 'iron_spear': 1, 'plate_armor': 1});
-      final spear = s.roster.firstWhere((x) => x.role == Role.spearman);
-      expect(
-        GameRules.equip(s, spear.id, 'hunting_bow').ok,
-        isFalse,
-      ); // sai vai trò
-      expect(
-        GameRules.equip(s, spear.id, 'iron_spear').ok,
-        isFalse,
-      ); // cần cấp 2
-      spear.level = 2;
-      expect(GameRules.equip(s, spear.id, 'iron_spear').ok, isTrue);
-      spear.level = 4;
-      spear.stats[Stat.str] = 5;
-      expect(
-        GameRules.equip(s, spear.id, 'plate_armor').ok,
-        isFalse,
-      ); // cần sức mạnh 11
-      spear.stats[Stat.str] = 11;
-      expect(GameRules.equip(s, spear.id, 'plate_armor').ok, isTrue);
-      expect(s.inventory['plate_armor'], 0);
-    });
+    test(
+      'equip: kiểm tra cấp độ và sức mạnh yêu cầu; không khóa theo nghề',
+      () {
+        final s = fresh();
+        s.inventory.addAll({
+          'hunting_bow': 1,
+          'iron_spear': 1,
+          'plate_armor': 1,
+        });
+        final spear = s.roster.firstWhere((x) => x.role == Role.spearman);
+        // Không có khóa nghề: giáo binh vẫn dùng được cung (nhóm vũ khí chỉ là đặc tính, không phải giấy phép).
+        expect(GameRules.equip(s, spear.id, 'hunting_bow').ok, isTrue);
+        expect(
+          GameRules.equip(s, spear.id, 'iron_spear').ok,
+          isFalse,
+        ); // cần cấp 2
+        spear.level = 2;
+        expect(GameRules.equip(s, spear.id, 'iron_spear').ok, isTrue);
+        spear.level = 4;
+        spear.stats[Stat.str] = 5;
+        expect(
+          GameRules.equip(s, spear.id, 'plate_armor').ok,
+          isFalse,
+        ); // cần sức mạnh 11
+        spear.stats[Stat.str] = 11;
+        expect(GameRules.equip(s, spear.id, 'plate_armor').ok, isTrue);
+        expect(s.inventory['plate_armor'], 0);
+      },
+    );
 
     test(
       'trước/sau trang bị: override cho kết quả so sánh mà không đổi binh sĩ',
@@ -270,8 +275,8 @@ void main() {
         final bow = fac(s, FacilityType.archeryRange);
         GameRules.assignToFacility(s, q.id, bow.id);
         GameRules.tickDay(s);
-        expect(q.train[Stat.dex], (trainPercentPerDay * 1.3).round());
-        q.stats[Stat.dex] = GameRules.statCap(q);
+        expect(q.train[Stat.str], (trainPercentPerDay * 1.3).round());
+        q.stats[Stat.str] = GameRules.statCap(q);
         GameRules.tickDay(s);
         expect(bow.assigned.contains(q.id), isFalse);
         expect(
@@ -327,11 +332,7 @@ void main() {
         isTrue,
       );
       expect(
-        GameRules.buildFacility(
-          s,
-          FacilityType.storageChest,
-          GameRules.freeChestSpotIndices(s).first,
-        ).ok,
+        GameRules.buildFacility(s, FacilityType.storageChest, -1).ok,
         isTrue,
       );
       expect(GameRules.slotFacilityCount(s), lessThanOrEqualTo(maxFacilities));
@@ -678,7 +679,7 @@ void main() {
       );
     });
 
-    test('hồi phục: nghỉ ngơi 10%/ngày, lều cứu thương 40%/ngày, không vượt HP tối đa', () {
+    test('hồi phục: nghỉ ngơi 10%/ngày, lều cứu thương 20 HP/ngày, không vượt HP tối đa', () {
       final s = fresh();
       final a = s.roster[0], b = s.roster[1];
       a.hp = 1;
@@ -690,7 +691,7 @@ void main() {
       );
       GameRules.tickDay(s);
       expect(a.hp, 1 + max(1, (a.maxHp * restHealFraction).round()));
-      expect(b.hp, 1 + max(1, (b.maxHp * infirmaryHealFraction).round()));
+      expect(b.hp, 21);
       for (var i = 0; i < 12; i++) {
         GameRules.tickDay(s);
       }
@@ -801,7 +802,8 @@ void main() {
       for (var i = 0; i < 20; i++) {
         GameRules.tickDay(s);
       }
-      expect(s.roster.every((x) => x.morale == 80), isTrue);
+      // Doanh trại (+) cộng thêm 1/ngày cho lính nhàn rỗi nên dao động quanh mức cân bằng.
+      expect(s.roster.every((x) => x.morale >= 80 && x.morale <= 81), isTrue);
     });
 
     test('nâng cấp công trình: chi phí, cấp tối đa, hiệu ứng sức chứa', () {
@@ -831,9 +833,15 @@ void main() {
       s.missions.add(Mission(id: 102, templateId: 'deliver_wood_a'));
       s.missions.add(Mission(id: 103, templateId: 'deliver_food_a'));
       for (final id in [100, 101, 102]) {
-        expect(GameRules.acceptMission(s, id).ok, isTrue);
+        expect(
+          GameRules.acceptMission(s..visiting ??= 'g_town', id).ok,
+          isTrue,
+        );
       }
-      expect(GameRules.acceptMission(s, 103).ok, isFalse);
+      expect(
+        GameRules.acceptMission(s..visiting ??= 'g_town', 103).ok,
+        isFalse,
+      );
       expect(
         s.missions.firstWhere((m) => m.id == 100).deadline,
         s.day + templateById('level_a').days,
@@ -843,7 +851,7 @@ void main() {
     test('giao nộp: cần đủ tài nguyên, trừ tài nguyên, nhận thưởng + hài lòng, chỉ một lần', () {
       final s = fresh();
       s.missions.add(Mission(id: 50, templateId: 'deliver_food_a'));
-      GameRules.acceptMission(s, 50);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 50);
       s.res[Res.food] = 10;
       expect(GameRules.completeMission(s, 50).ok, isFalse);
       s.res[Res.food] = 80;
@@ -860,7 +868,7 @@ void main() {
     test('quá hạn: nhiệm vụ thất bại, nhà vua bớt hài lòng đúng mức phạt', () {
       final s = fresh();
       s.missions.add(Mission(id: 60, templateId: 'deliver_wood_a'));
-      GameRules.acceptMission(s, 60);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 60);
       s.res[Res.wood] = 0;
       final sat = s.kingSatisfaction;
       final t = templateById('deliver_wood_a');
@@ -883,7 +891,7 @@ void main() {
     test('nộp đúng hạn ngày cuối vẫn được tính', () {
       final s = fresh();
       s.missions.add(Mission(id: 61, templateId: 'deliver_wood_a'));
-      GameRules.acceptMission(s, 61);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 61);
       final t = templateById('deliver_wood_a');
       for (var i = 0; i < t.days; i++) {
         GameRules.tickDay(s);
@@ -895,7 +903,7 @@ void main() {
     test('hài lòng về 0 thì game over; mọi hành động bị chặn', () {
       final s = fresh()..kingSatisfaction = 5;
       s.missions.add(Mission(id: 70, templateId: 'deliver_wood_a'));
-      GameRules.acceptMission(s, 70);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 70);
       s.res[Res.wood] = 0;
       for (var i = 0; i < 8; i++) {
         GameRules.tickDay(s);
@@ -909,7 +917,7 @@ void main() {
     test('bỏ nhiệm vụ bị phạt một nửa', () {
       final s = fresh();
       s.missions.add(Mission(id: 80, templateId: 'clear_bandits'));
-      GameRules.acceptMission(s, 80);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 80);
       final sat = s.kingSatisfaction;
       expect(GameRules.abandonMission(s, 80).ok, isTrue);
       expect(s.kingSatisfaction, sat - 4);
@@ -917,10 +925,9 @@ void main() {
 
     test('mức độ hài lòng luôn nằm trong 0..100', () {
       final s = fresh()..kingSatisfaction = 98;
-      s.missions.add(Mission(id: 90, templateId: 'clear_bandits'));
-      GameRules.acceptMission(s, 90);
-      s.cleared.add('g_bandits');
-      s.missions.firstWhere((m) => m.id == 90).progress = 1;
+      s.res[Res.food] = 200;
+      s.missions.add(Mission(id: 90, templateId: 'deliver_food_a'));
+      GameRules.acceptMission(s..visiting ??= 'g_town', 90);
       GameRules.completeMission(s, 90);
       expect(s.kingSatisfaction, 100);
     });
@@ -939,7 +946,7 @@ void main() {
         }
         s.missions.removeWhere((_) => true);
         s.missions.add(Mission(id: 500, templateId: 'clear_bandits'));
-        GameRules.acceptMission(s, 500);
+        GameRules.acceptMission(s..visiting ??= 'g_town', 500);
         final squad = ids(s, 8);
         final res = GameRules.sendExpedition(s, 'g_bandits', squad, {
           for (final id in squad.take(5)) id,
@@ -949,13 +956,10 @@ void main() {
         expect(s.day, 1 + 1);
         if (res.battle!.winner == Winner.player) {
           expect(s.cleared.contains('g_bandits'), isTrue);
-          expect(
-            GameRules.missionReady(
-              s,
-              s.missions.firstWhere((m) => m.id == 500),
-            ),
-            isTrue,
-          );
+          // Thắng trận = hoàn thành + trao thưởng ngay (một lần).
+          final m500 = s.missions.firstWhere((m) => m.id == 500);
+          expect(m500.status, MissionStatus.completed);
+          expect(m500.rewarded, isTrue);
           // không thể quét lại địa điểm đã sạch
           expect(
             GameRules.sendExpedition(s, 'g_bandits', squad, {}).result.ok,
@@ -976,7 +980,7 @@ void main() {
         }
         s.missions.clear();
         s.missions.add(Mission(id: 500, templateId: 'clear_bandits'));
-        GameRules.acceptMission(s, 500);
+        GameRules.acceptMission(s..visiting ??= 'g_town', 500);
         final squad = [for (final x in s.roster.skip(6)) x.id]..length = 2;
         for (final id in squad) {
           s.soldier(id)!
@@ -1022,7 +1026,7 @@ void main() {
       s.discovered.add('g_tower');
       s.missions.clear();
       s.missions.add(Mission(id: 600, templateId: 'explore_green'));
-      GameRules.acceptMission(s, 600);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 600);
       final r = GameRules.sendExpedition(s, 'g_tower', ids(s, 3), {});
       expect(r.result.ok, isTrue);
       expect(s.explored.contains('g_tower'), isTrue);
@@ -1096,7 +1100,7 @@ void main() {
       s.discovered.add('m_fort');
       s.missions.clear();
       s.missions.add(Mission(id: 700, templateId: 'final_fort'));
-      GameRules.acceptMission(s, 700);
+      GameRules.acceptMission(s..visiting ??= 'g_town', 700);
       s.cleared.add('m_fort');
       s.missions.first.progress = 1;
       expect(GameRules.completeMission(s, 700).ok, isTrue);
@@ -1143,7 +1147,10 @@ void main() {
           MissionStatus.offered,
         ).where((m) => m.templateId == 'clear_bandits').firstOrNull;
         if (bandit == null) continue;
-        expect(GameRules.acceptMission(s, bandit.id).ok, isTrue);
+        expect(
+          GameRules.acceptMission(s..visiting ??= 'g_town', bandit.id).ok,
+          isTrue,
+        );
         final squad = [
           for (final x in s.roster.where((x) => x.available).take(8)) x.id,
         ];
@@ -1154,16 +1161,9 @@ void main() {
         expect(r.result.ok, isTrue);
         expect(r.casualties.length, squad.length);
         if (r.battle!.winner == Winner.player) {
-          expect(
-            GameRules.missionReady(
-              s,
-              s.missions.firstWhere((m) => m.id == bandit.id),
-            ),
-            isTrue,
-          );
-          final coins = s.res[Res.coins]!;
-          expect(GameRules.completeMission(s, bandit.id).ok, isTrue);
-          expect(s.res[Res.coins]! > coins, isTrue);
+          final m = s.missions.firstWhere((m) => m.id == bandit.id);
+          expect(m.status, MissionStatus.completed);
+          expect(m.rewarded, isTrue);
           expect(s.missionsCompleted, 1);
           done = true;
         }
@@ -1217,7 +1217,10 @@ void main() {
             case 5:
               final off = GameRules.byStatus(s, MissionStatus.offered);
               if (off.isNotEmpty) {
-                GameRules.acceptMission(s, off[rng.nextInt(off.length)].id);
+                GameRules.acceptMission(
+                  s..visiting ??= 'g_town',
+                  off[rng.nextInt(off.length)].id,
+                );
               }
             case 6:
               final act = GameRules.byStatus(s, MissionStatus.active);

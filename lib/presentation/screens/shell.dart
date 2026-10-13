@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../widgets/common.dart';
-import '../widgets/hud.dart';
 import 'buildings_screen.dart';
 import 'camp_hub.dart';
 import 'map_screen.dart';
@@ -68,11 +67,15 @@ class _GameShellState extends State<GameShell> {
     final railW = d.compact ? 58.0 : 72.0;
     // App Shell (thanh điều hướng mọi mục) chỉ có khi Develop Mode bật. Bình thường, Tuyển mộ và
     // Xây dựng không có đường vào nên không thể đang mở: quay về Trại.
-    final showRail = c.devMode;
+    final railAllowed = c.devMode;
     final index =
-        (!showRail && (_index == Sections.recruit || _index == Sections.build))
+        (!railAllowed &&
+            (_index == Sections.recruit || _index == Sections.build))
         ? Sections.camp
         : _index;
+    // Trại dùng toàn bộ chiều ngang màn hình: thanh điều hướng (chỉ có ở Develop Mode) bị ẩn ở tab Trại và
+    // hiện lại ở các tab khác để còn quay về.
+    final showRail = railAllowed && index != Sections.camp;
     return ShellNav(
       go: (i) => setState(() => _index = i),
       child: Scaffold(
@@ -142,7 +145,6 @@ class _GameShellState extends State<GameShell> {
                   Expanded(
                     child: Column(
                       children: [
-                        Hud(onMenu: () => _menu(context, c)),
                         if (c.saveError != null)
                           Container(
                             width: double.infinity,
@@ -178,39 +180,6 @@ class _GameShellState extends State<GameShell> {
         ),
       ),
     );
-  }
-
-  Future<void> _menu(BuildContext context, dynamic c) async {
-    final choice = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Menu'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, 'menu'),
-            child: const Text('Về menu chính (đã lưu tự động)'),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, 'new'),
-            child: const Text('Bắt đầu ván mới'),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng'),
-          ),
-        ],
-      ),
-    );
-    if (!context.mounted) return;
-    if (choice == 'menu') c.backToMenu();
-    if (choice == 'new' &&
-        await confirm(
-          context,
-          'Bắt đầu ván mới?',
-          'Ván hiện tại sẽ bị thay thế (bản sao dự phòng được giữ).',
-        )) {
-      await c.newGame();
-    }
   }
 }
 

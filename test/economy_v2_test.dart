@@ -261,7 +261,7 @@ void main() {
       () {
         final s = fresh();
         s.missions.add(Mission(id: 900, templateId: 'deliver_wood_a'));
-        GameRules.acceptMission(s, 900);
+        GameRules.acceptMission(s..visiting ??= 'g_town', 900);
         final t = templateById('deliver_wood_a');
         final sat = s.kingSatisfaction;
         DayReport? last;

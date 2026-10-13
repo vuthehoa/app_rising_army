@@ -133,17 +133,21 @@ void main() {
     );
 
     testWidgets(
-      'Dev ON: rail và launcher hiện ngay; tắt thì biến mất, game không reset',
+      'Dev ON: launcher hiện ngay, rail chỉ hiện ngoài tab Trại; tắt thì biến mất, game không reset',
       (tester) async {
         final c = await boot(tester);
         final day = c.state!.day;
         c.setDevMode(true);
         await tester.pumpAndSettle();
-        expect(find.byKey(const ValueKey('app-shell-rail')), findsOneWidget);
+        // Tab Trại dùng toàn bộ chiều ngang: thanh điều hướng bị ẩn ở đây, hiện ở các tab khác.
+        expect(find.byKey(const ValueKey('app-shell-rail')), findsNothing);
         expect(
           find.byKey(const ValueKey('dev-screens-button')),
           findsOneWidget,
         );
+        await tester.tap(find.text('Bản đồ'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('app-shell-rail')), findsOneWidget);
         c.setDevMode(false);
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('app-shell-rail')), findsNothing);

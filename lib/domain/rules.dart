@@ -1,12 +1,17 @@
 import 'dart:math';
 
 import 'battle.dart';
+import 'building_effects.dart';
+import 'camp_layout.dart';
 import 'catalog.dart';
 import 'dev_mode.dart';
 import 'identity.dart';
 import 'item_grade.dart';
 import 'models.dart';
+import 'progression.dart';
 import 'stats.dart';
+import 'terrain_type.dart';
+import 'world_data.dart';
 
 enum CasualtyKind { survived, wounded, dead }
 
@@ -356,6 +361,28 @@ class GameRules {
     return ActionResult.ok('Đã đổi tên thành $n.');
   }
 
+  /// Sa thải binh sĩ đang phục vụ: gỡ khỏi quân đội và công trình, trả trang bị về kho (như [unequip],
+  /// không mất/nhân đôi). KHÔNG phải tử trận: không tính [GameState.fallenTotal], không vào [GameState.fallen].
+  /// Không hoàn tiền. Trận đánh được giải quyết nguyên tử trong luật nên không có binh sĩ "đang giao chiến".
+  static ActionResult dismiss(GameState s, int id) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final so = s.soldier(id);
+    if (so == null || !so.alive) {
+      return const ActionResult.fail('Không tìm thấy binh sĩ.');
+    }
+    for (final slot in Slot.values) {
+      final item = so.equipped(slot);
+      if (item != null) s.inventory[item] = (s.inventory[item] ?? 0) + 1;
+    }
+    for (final f in s.facilities) {
+      f.assigned.remove(id);
+    }
+    s.soldiers.removeWhere((x) => x.id == id);
+    s.addLog('${so.name} bị sa thải khỏi quân đội.');
+    return ActionResult.ok('Đã sa thải ${so.name}.');
+  }
+
   // ---------- Công trình trong trại: gán bằng kéo-thả, huấn luyện, chữa trị ----------
 
   static Facility? facilityById(GameState s, int id) {
@@ -395,9 +422,9 @@ class GameRules {
     if (f.assigned.contains(soldierId)) {
       return const ActionResult.fail('Binh sĩ đã ở công trình này.');
     }
-    if (f.assigned.length >= Facility.capacity) {
+    if (f.assigned.length >= f.slots) {
       return ActionResult.fail(
-        '${facilityDefs[f.type]!.name} đã đầy (${Facility.capacity}/${Facility.capacity}).',
+        '${facilityDefs[f.type]!.name} đã đầy (${f.slots}/${f.slots}).',
       );
     }
     final st = facilityDefs[f.type]!.trains;
@@ -413,6 +440,133 @@ class GameRules {
     return ActionResult.ok('${so.name} vào ${facilityDefs[f.type]!.name}.');
   }
 
+  // ---------- Quản lý công trình đã đặt: di chuyển, xóa, nâng cấp slot ----------
+
+  /// Dời công trình [id] tới (x, y). Giữ nguyên id, cấp, binh sĩ được gán; chỉ đổi tọa độ, dùng đúng
+  /// [checkPlacement] (bỏ qua chính nó) như luật xây. Vị trí sai thì không đổi gì.
+  static ActionResult moveFacility(GameState s, int id, double x, double y) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final f = facilityById(s, id);
+    if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
+    final check = checkPlacement(s, f.type, x, y, ignoreId: id);
+    if (!check.ok) return ActionResult.fail(check.message);
+    f.x = x;
+    f.y = y;
+    return ActionResult.ok('Đã dời ${facilityDefs[f.type]!.name}.');
+  }
+
+  /// Lý do không xóa được công trình [f]; null nếu xóa được.
+  static String? removeBlockReason(GameState s, Facility f) {
+    if (f.type == FacilityType.barracks) {
+      return 'Doanh trại quyết định quân số tối đa nên không thể xóa.';
+    }
+    if (f.type == FacilityType.storageChest &&
+        inventoryCount(s) > inventoryCapacity(s) - chestInventoryBonus) {
+      return 'Kho đồ đang chứa quá sức chứa còn lại nếu bỏ Hòm đồ này.';
+    }
+    return null;
+  }
+
+  /// Xóa công trình [id]. Binh sĩ đang được gán chỉ rời công trình (trở thành nhàn rỗi), không mất/nhân đôi.
+  /// Không hoàn tiền (game chưa có quy tắc hoàn tiền).
+  static ActionResult removeFacility(GameState s, int id) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final f = facilityById(s, id);
+    if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
+    final why = removeBlockReason(s, f);
+    if (why != null) return ActionResult.fail(why);
+    s.facilities.remove(f);
+    final name = facilityDefs[f.type]!.name;
+    s.addLog('Dỡ bỏ $name.');
+    return ActionResult.ok('Đã xóa $name.');
+  }
+
+  /// Công trình nhận binh sĩ có nâng cấp slot được không (đúng 4 loại trong [facilityUpgradeCosts]; Doanh trại
+  /// đi theo [upgradeBuilding]).
+  static bool facilityUpgradable(Facility f) =>
+      facilityUpgradeCosts.containsKey(f.type);
+
+  /// Nâng cấp slot 3 → 6, đúng một lần.
+  static ActionResult upgradeFacility(GameState s, int id) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final f = facilityById(s, id);
+    if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
+    final cost = facilityUpgradeCosts[f.type];
+    if (cost == null) {
+      return const ActionResult.fail('Công trình này không có nâng cấp slot.');
+    }
+    final name = facilityDefs[f.type]!.name;
+    if (f.level >= Facility.maxLevel) {
+      return ActionResult.fail('$name đã nâng cấp tối đa.');
+    }
+    if (!canAfford(s, cost)) {
+      return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
+    }
+    spend(s, cost);
+    f.level = Facility.maxLevel;
+    s.addLog('$name nâng cấp lên ${f.slots} slot.');
+    return ActionResult.ok('$name đã nâng cấp: ${f.slots} slot.');
+  }
+
+  // ---------- Bia mộ: hồi sinh ----------
+
+  /// Binh sĩ đã tử trận (nguồn duy nhất: [GameState.fallen]); không có danh sách chết riêng.
+  static ActionResult reviveSoldier(GameState s, int id) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    if (facilityCount(s, FacilityType.gravestone) == 0) {
+      return const ActionResult.fail('Cần xây Bia mộ để hồi sinh.');
+    }
+    final so = s.soldier(id);
+    if (so == null || so.status != SoldierStatus.dead) {
+      return const ActionResult.fail('Binh sĩ này không ở trong Bia mộ.');
+    }
+    if (s.roster.length >= rosterCap(s)) {
+      return const ActionResult.fail(
+        'Quân đội đã đủ quân số tối đa. Nâng cấp Doanh trại để hồi sinh thêm.',
+      );
+    }
+    final cost = {Res.coins: reviveCost(so)};
+    if (!canAfford(s, cost)) {
+      return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
+    }
+    spend(s, cost);
+    so.status = SoldierStatus.active;
+    so.hp = so.maxHp;
+    s.addLog('${so.name} được hồi sinh.');
+    return ActionResult.ok('${so.name} đã được hồi sinh.');
+  }
+
+  /// Đặt binh sĩ đứng tự do tại (x, y) trong Trại. Vị trí không hợp lệ thì không đổi gì. Nếu lính đang ở
+  /// trong một công trình thì rời công trình đó (đứng ngoài đất trống).
+  static ActionResult moveSoldier(
+    GameState s,
+    int soldierId,
+    double x,
+    double y,
+  ) {
+    final so = s.soldier(soldierId);
+    if (so == null || !so.alive) {
+      return const ActionResult.fail('Không tìm thấy binh sĩ.');
+    }
+    final check = CampLayout.checkSoldierSpot(s.facilities, x, y);
+    if (!check.ok) {
+      return ActionResult.fail(switch (check.issue) {
+        CampPlacementIssue.outOfLand => 'Không thể đứng ngoài khu trại.',
+        _ => 'Vị trí này bị chặn.',
+      });
+    }
+    for (final f in s.facilities) {
+      f.assigned.remove(soldierId);
+    }
+    so.campX = x;
+    so.campY = y;
+    return ActionResult.ok('${so.name} đã di chuyển.');
+  }
+
   static ActionResult unassign(GameState s, int soldierId) {
     final so = s.soldier(soldierId);
     if (so == null) return const ActionResult.fail('Không tìm thấy binh sĩ.');
@@ -425,97 +579,73 @@ class GameRules {
         : const ActionResult.fail('Binh sĩ không ở công trình nào.');
   }
 
-  /// Vị trí đặt công trình mới: các ô cố định trong cảnh trại (tỷ lệ 0..1), tránh chồng lên cái đã có.
-  static const facilitySlots = <(double, double)>[
-    (0.27, 0.4),
-    (0.5, 0.3),
-    (0.76, 0.4),
-    (0.5, 0.64),
-    (0.14, 0.7),
-    (0.86, 0.7),
-    (0.3, 0.8),
-    (0.7, 0.8),
-    (0.15, 0.34),
-    (0.85, 0.34),
-  ];
+  /// 12 vị trí tham chiếu (lưới 4 cột × 3 hàng) để gợi ý/tương thích; công trình có thể đặt TỰ DO ở mọi
+  /// vị trí hợp lệ theo [CampLayout.check] (kéo thả). Chỉ số ở đây dùng cho các lối gọi theo ô.
+  static const facilitySlots = CampLayout.referenceSlots;
 
-  /// Vị trí bếp lửa trang trí giữa trại: không phải công trình, nhưng không được đặt công trình lên đó.
-  static const campfireSpot = (0.5, 0.64);
+  /// Tâm bếp lửa trang trí (chính giữa hàng giữa của vùng đất). Không phải công trình, nhưng là vật cản.
+  static const campfireSpot = CampLayout.campfire;
 
-  /// Số vị trí trong khu chứa Hòm đồ trước khi xếp chồng lớp thứ hai.
-  static const chestGridSize = 18;
+  /// Kiểm tra duy nhất cho vị trí đặt [type] tại (x, y) (tọa độ chuẩn hóa của khung Trại). Giao diện tô
+  /// xanh/đỏ và luật xây dựng ([buildFacilityAt]) đều dùng đúng hàm này.
+  static CampPlacementCheck checkPlacement(
+    GameState s,
+    FacilityType type,
+    double x,
+    double y, {
+    int? ignoreId,
+  }) => CampLayout.check(
+    ignoreId == null
+        ? s.facilities
+        : s.facilities.where((f) => f.id != ignoreId),
+    type,
+    x,
+    y,
+  );
 
-  /// Khu chứa Hòm đồ (không dùng ô công trình): hai cột sát mép phải và trái của trại, từ trên xuống,
-  /// tránh HUD (trên/dưới), thanh hành động (giữa dưới) và các ô công trình. Vượt [chestGridSize] thì
-  /// xếp vào lớp trong (dịch vào 0.03) nên số lượng hòm không bị giới hạn.
-  static (double, double) chestSpot(int index) {
-    final col = index % 2;
-    final row = (index ~/ 2) % (chestGridSize ~/ 2);
-    final layer = index ~/ chestGridSize;
-    final x = (col == 0 ? 0.965 - 0.03 * layer : 0.035 + 0.03 * layer).clamp(
-      0.02,
-      0.98,
-    );
-    return (x, 0.18 + 0.075 * row);
-  }
+  /// Vị trí hợp lệ gợi ý cho [type] (null nếu hết chỗ).
+  static (double, double)? suggestPlacement(GameState s, FacilityType type) =>
+      CampLayout.suggest(s.facilities, type);
 
-  static bool _chestSpotTaken(GameState s, int i) {
-    final p = chestSpot(i);
-    return s.facilities.any(
-      (f) =>
-          f.type == FacilityType.storageChest &&
-          (f.x - p.$1).abs() < 0.01 &&
-          (f.y - p.$2).abs() < 0.01,
-    );
-  }
-
-  /// Các vị trí trống để đặt Hòm đồ mới: ô trống trong lưới, nếu hết thì vị trí xếp chồng kế tiếp.
-  /// Luôn có ít nhất một vị trí nên số lượng hòm không bao giờ bị chặn vì hết chỗ.
-  static List<int> freeChestSpotIndices(GameState s) {
-    final free = [
-      for (var i = 0; i < chestGridSize; i++)
-        if (!_chestSpotTaken(s, i)) i,
-    ];
-    if (free.isNotEmpty) return free;
-    var i = chestGridSize;
-    while (_chestSpotTaken(s, i)) {
-      i++;
-    }
-    return [i];
-  }
-
-  /// Chỉ số vị trí hợp lệ để đặt [type]: ô công trình, hoặc vị trí Hòm đồ.
-  static List<int> placementIndices(GameState s, FacilityType type) =>
-      facilityDefs[type]!.usesSlot
-      ? freeSlotIndices(s)
-      : freeChestSpotIndices(s);
-
-  static bool _isCampfireSlot(int i) =>
-      facilitySlots[i].$1 == campfireSpot.$1 &&
-      facilitySlots[i].$2 == campfireSpot.$2;
-
+  /// Các ô tham chiếu còn trống (hợp lệ) cho công trình thường.
   static List<int> freeSlotIndices(GameState s) => [
     for (var i = 0; i < facilitySlots.length; i++)
-      if (!_isCampfireSlot(i) &&
-          !s.facilities.any(
-            (f) =>
-                facilityDefs[f.type]!.usesSlot &&
-                (f.x - facilitySlots[i].$1).abs() < 0.06 &&
-                (f.y - facilitySlots[i].$2).abs() < 0.06,
-          ))
+      if (CampLayout.check(
+        s.facilities,
+        FacilityType.meleeYard,
+        facilitySlots[i].$1,
+        facilitySlots[i].$2,
+      ).ok)
         i,
   ];
 
-  /// Xây MỘT công trình mới trong trại tại vị trí [slotIndex] (ô công trình, hoặc vị trí Hòm đồ).
-  ///
-  /// Mọi điều kiện được kiểm tra lại ở đây (không tin UI): giới hạn số lượng, chỗ trống, tài nguyên.
-  /// Chỉ khi hợp lệ mới trừ tài nguyên và thêm instance; thất bại không đổi gì.
-  /// Doanh trại: instance + cấp 1 (`buildings[barracks]`) được tạo cùng lúc; các cấp sau là
-  /// [upgradeBuilding]. Hòm đồ không giới hạn số lượng và không tính vào [maxFacilities].
+  /// Xây MỘT công trình mới theo ô tham chiếu [slotIndex] (-1: vị trí gợi ý đầu tiên). Xem [buildFacilityAt].
   static ActionResult buildFacility(
     GameState s,
     FacilityType type,
     int slotIndex,
+  ) {
+    final pos = slotIndex >= 0 && slotIndex < facilitySlots.length
+        ? facilitySlots[slotIndex]
+        : (slotIndex == -1 ? suggestPlacement(s, type) : null);
+    if (pos == null) {
+      return const ActionResult.fail('Không còn vị trí hợp lệ.');
+    }
+    return buildFacilityAt(s, type, pos.$1, pos.$2);
+  }
+
+  /// Xây MỘT công trình mới tại (x, y).
+  ///
+  /// Mọi điều kiện được kiểm tra lại ở đây (không tin UI): giới hạn số lượng, vị trí hợp lệ
+  /// ([CampLayout.check]: trong vùng đất, không chồng công trình/bếp lửa/khu cổng) và tài nguyên.
+  /// Chỉ khi hợp lệ mới trừ tài nguyên và thêm instance; thất bại không đổi gì.
+  /// Doanh trại: instance + cấp 1 (`buildings[barracks]`) được tạo cùng lúc; các cấp sau là
+  /// [upgradeBuilding]. Hòm đồ không giới hạn số lượng và không tính vào [maxFacilities].
+  static ActionResult buildFacilityAt(
+    GameState s,
+    FacilityType type,
+    double x,
+    double y,
   ) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
@@ -531,22 +661,67 @@ class GameRules {
     if (def.usesSlot && slotFacilityCount(s) >= maxFacilities) {
       return const ActionResult.fail('Trại đã đạt số công trình tối đa.');
     }
-    if (!placementIndices(s, type).contains(slotIndex)) {
-      return const ActionResult.fail(
-        'Vị trí này không hợp lệ hoặc đã có công trình.',
-      );
-    }
+    final check = checkPlacement(s, type, x, y);
+    if (!check.ok) return ActionResult.fail(check.message);
     if (!canAfford(s, def.cost)) {
       return ActionResult.fail('Không đủ: ${_missing(s, def.cost)}.');
     }
     spend(s, def.cost);
-    final pos = def.usesSlot ? facilitySlots[slotIndex] : chestSpot(slotIndex);
-    s.facilities.add(
-      Facility(id: s.nextFacilityId++, type: type, x: pos.$1, y: pos.$2),
-    );
+    s.facilities.add(Facility(id: s.nextFacilityId++, type: type, x: x, y: y));
     if (type == FacilityType.barracks) s.buildings[Building.barracks] = 1;
     s.addLog('Xây ${def.name}.');
     return ActionResult.ok('Đã xây ${def.name}.');
+  }
+
+  /// Sửa bố cục của save cũ: công trình nằm ngoài vùng đất mới hoặc chồng lên cái khác/bếp lửa được dời tới vị
+  /// trí hợp lệ gần nhất (theo thứ tự id, deterministic). Công trình đã hợp lệ giữ nguyên tọa độ. Idempotent;
+  /// true nếu có thay đổi.
+  static bool repairCampLayout(GameState s) {
+    var changed = false;
+    final accepted = <Facility>[];
+    final ordered = [...s.facilities]..sort((a, b) => a.id.compareTo(b.id));
+    for (final f in ordered) {
+      if (CampLayout.check(accepted, f.type, f.x, f.y).ok) {
+        accepted.add(f);
+        continue;
+      }
+      final p = _nearestValid(accepted, f);
+      if (p == null) {
+        accepted.add(f);
+        continue;
+      }
+      final i = s.facilities.indexOf(f);
+      final moved = Facility(
+        id: f.id,
+        type: f.type,
+        x: p.$1,
+        y: p.$2,
+        assigned: f.assigned,
+        level: f.level,
+      );
+      s.facilities[i] = moved;
+      accepted.add(moved);
+      changed = true;
+    }
+    return changed;
+  }
+
+  static (double, double)? _nearestValid(List<Facility> accepted, Facility f) {
+    (double, double)? best;
+    var bestD = double.infinity;
+    const l = CampLayout.land;
+    for (var y = l.top; y <= l.bottom; y += 0.01) {
+      for (var x = l.left; x <= l.right; x += 0.01) {
+        if (!CampLayout.check(accepted, f.type, x, y).ok) continue;
+        final dx = (x - f.x) * CampLayout.aspect, dy = y - f.y;
+        final d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = (x, y);
+        }
+      }
+    }
+    return best;
   }
 
   /// Save cũ/test có Doanh trại cấp > 0 nhưng chưa có instance: tạo instance (miễn phí, không đổi cấp)
@@ -556,9 +731,8 @@ class GameRules {
         facilityCount(s, FacilityType.barracks) > 0) {
       return false;
     }
-    final free = freeSlotIndices(s);
-    if (free.isEmpty) return false;
-    final pos = facilitySlots[free.first];
+    final pos = suggestPlacement(s, FacilityType.barracks);
+    if (pos == null) return false;
     s.facilities.add(
       Facility(
         id: s.nextFacilityId++,
@@ -600,7 +774,8 @@ class GameRules {
     if (max != null && count >= max) {
       why = 'Đã xây';
     } else if (def.usesSlot &&
-        (slotFacilityCount(s) >= maxFacilities || freeSlotIndices(s).isEmpty)) {
+        (slotFacilityCount(s) >= maxFacilities ||
+            suggestPlacement(s, t) == null)) {
       why = 'Hết ô trống';
     } else if (!canAfford(s, def.cost)) {
       why = 'Không đủ tài nguyên';
@@ -620,9 +795,7 @@ class GameRules {
   static ActionResult buildCamp(GameState s, CampBuildingDef d) {
     final st = campStatus(s, d);
     if (!st.needsPlacement) return upgradeBuilding(s, d.building!);
-    final t = d.facility!;
-    final idx = placementIndices(s, t);
-    return buildFacility(s, t, idx.isEmpty ? -1 : idx.first);
+    return buildFacility(s, d.facility!, -1);
   }
 
   /// Trả về số cấp tăng.
@@ -632,7 +805,7 @@ class GameRules {
         : amount;
     so.xp += gain;
     var ups = 0;
-    while (so.xp >= xpForNext(so.level) && so.level < 20) {
+    while (so.xp >= xpForNext(so.level) && so.level < maxSoldierLevel) {
       so.xp -= xpForNext(so.level);
       so.level++;
       ups++;
@@ -645,6 +818,57 @@ class GameRules {
       so.stats[st] = so.stats[st]! + 1;
     }
     return ups;
+  }
+
+  // ---------- Kỹ năng & tài năng ----------
+
+  /// Học (hoặc nâng) một kỹ năng bằng điểm kỹ năng. Điểm còn lại suy ra từ cấp, không lưu riêng.
+  static ActionResult learnSkill(GameState s, int soldierId, String skillId) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final so = s.soldier(soldierId);
+    final d = skillDefs[skillId];
+    if (so == null || !so.alive || d == null) {
+      return const ActionResult.fail('Dữ liệu không hợp lệ.');
+    }
+    final cur = so.skills[skillId] ?? 0;
+    if (cur >= d.maxLevel) {
+      return ActionResult.fail('${d.name} đã đạt cấp tối đa.');
+    }
+    if (so.level < d.requiredLevel) {
+      return ActionResult.fail('${d.name} cần cấp ${d.requiredLevel}.');
+    }
+    final cost = d.costOf(cur + 1);
+    if (skillPointsLeft(so) < cost) {
+      return ActionResult.fail('Không đủ điểm kỹ năng (cần $cost).');
+    }
+    so.skills[skillId] = cur + 1;
+    so.hp = min(so.hp, so.maxHp);
+    return ActionResult.ok('${so.name} học ${d.name} cấp ${cur + 1}.');
+  }
+
+  /// Chọn tài năng cho một mốc cấp. Mỗi mốc chọn một lần, không đổi được.
+  static ActionResult chooseTalent(
+    GameState s,
+    int soldierId,
+    String talentId,
+  ) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final so = s.soldier(soldierId);
+    final t = talentDefs[talentId];
+    if (so == null || !so.alive || t == null) {
+      return const ActionResult.fail('Dữ liệu không hợp lệ.');
+    }
+    if (so.level < talentTierLevels[t.tier]) {
+      return ActionResult.fail('Cần cấp ${talentTierLevels[t.tier]}.');
+    }
+    if (!openTalentTiers(so).contains(t.tier)) {
+      return const ActionResult.fail('Mốc tài năng này đã được chọn.');
+    }
+    so.talents.add(talentId);
+    so.hp = min(so.hp, so.maxHp);
+    return ActionResult.ok('${so.name} có tài năng ${t.name}.');
   }
 
   // ---------- Trang bị ----------
@@ -801,6 +1025,32 @@ class GameRules {
       );
     }
     return null;
+  }
+
+  /// Vào thị trấn [townId] khi nhân vật đã đi tới đủ gần. Không dịch chuyển nhân vật.
+  static ActionResult enterTown(GameState s, String townId) {
+    final town = worldMap.townById(townId);
+    final loc = locationById(townId);
+    if (town == null || loc == null) {
+      return const ActionResult.fail('Không có thị trấn này.');
+    }
+    if (!regionUnlocked(s, regionById(loc.regionId))) {
+      return ActionResult.fail(
+        '${loc.name} chưa mở cửa với bạn: hãy hoàn thành thêm nhiệm vụ.',
+      );
+    }
+    if (town.position.distanceTo(s.hero.position) > town.enterRadius) {
+      return const ActionResult.fail('Bạn còn quá xa thị trấn.');
+    }
+    s.visiting = townId;
+    for (final m in activeAt(s, townId)) {
+      final t = templateById(m.templateId);
+      if (t.kind == MissionKind.visit && m.progress == 0) m.progress = 1;
+    }
+    final done = settleReadyAt(s, townId);
+    return ActionResult.ok(
+      done.isEmpty ? 'Vào ${loc.name}.' : 'Vào ${loc.name}. ${done.join(' ')}',
+    );
   }
 
   static ActionResult leaveCity(GameState s) {
@@ -1059,9 +1309,40 @@ class GameRules {
     }
   }
 
+  /// Địa điểm mục tiêu trên bản đồ của nhiệm vụ [t] vừa nhận tại [giver]:
+  /// diệt trại/đến thị trấn → địa điểm của mẫu; khám phá → tàn tích chưa khám phá gần nhất trong vùng;
+  /// nộp tài nguyên/luyện binh/trang bị → quay lại thành trấn đã nhận để báo cáo.
+  static String? objectiveFor(GameState s, MissionTemplate t, String? giver) {
+    switch (t.kind) {
+      case MissionKind.clear || MissionKind.visit:
+        return t.locId;
+      case MissionKind.explore:
+        for (final l in locations) {
+          if (l.regionId == t.regionId &&
+              l.kind == LocKind.ruins &&
+              !s.explored.contains(l.id) &&
+              worldMap.placements.containsKey(l.id)) {
+            return l.id;
+          }
+        }
+        return null;
+      case MissionKind.deliver ||
+          MissionKind.levelCount ||
+          MissionKind.gearCount:
+        return giver;
+    }
+  }
+
+  /// Chỉ nhận được khi nhân vật đang ở trong một thành trấn (đã vào thành, `visiting` khác null).
   static ActionResult acceptMission(GameState s, int id) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
+    final town = s.visiting == null ? null : locationById(s.visiting!);
+    if (town == null || town.kind != LocKind.city) {
+      return const ActionResult.fail(
+        'Chỉ nhận nhiệm vụ khi đang ở trong thành trấn.',
+      );
+    }
     final m = s.missions.where((m) => m.id == id).firstOrNull;
     if (m == null || m.status != MissionStatus.offered) {
       return const ActionResult.fail('Nhiệm vụ không còn.');
@@ -1072,12 +1353,36 @@ class GameRules {
     final t = templateById(m.templateId);
     m.status = MissionStatus.active;
     m.deadline = s.day + t.days;
+    m.giverTown = town.id;
+    m.targetId = objectiveFor(s, t, town.id);
     m.progress = (t.kind == MissionKind.clear && s.cleared.contains(t.locId))
         ? 1
         : 0;
     s.addLog('Nhận nhiệm vụ: ${t.title} (hạn ngày ${m.deadline}).');
     return ActionResult.ok('Đã nhận: ${t.title}. Hạn ngày ${m.deadline}.');
   }
+
+  /// Nhiệm vụ đang được theo dõi (mũi tên chỉ hướng): đang làm, chưa hết hạn, có mục tiêu đặt được
+  /// trên bản đồ; ưu tiên hạn gần nhất, hòa thì nhiệm vụ nhận trước (id nhỏ hơn).
+  static Mission? trackedMission(GameState s) {
+    Mission? best;
+    for (final m in byStatus(s, MissionStatus.active)) {
+      if (s.day > m.deadline || m.targetId == null) continue;
+      if (worldMap.positionOf(m.targetId!) == null) continue;
+      if (best == null ||
+          m.deadline < best.deadline ||
+          (m.deadline == best.deadline && m.id < best.id)) {
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  /// Nhiệm vụ đang thực hiện còn hạn có mục tiêu tại địa điểm [locId].
+  static List<Mission> activeAt(GameState s, String locId) => [
+    for (final m in byStatus(s, MissionStatus.active))
+      if (m.targetId == locId && s.day <= m.deadline) m,
+  ];
 
   static ActionResult abandonMission(GameState s, int id) {
     final m = s.missions.where((m) => m.id == id).firstOrNull;
@@ -1092,6 +1397,9 @@ class GameRules {
     fillBoard(s);
     return ActionResult.ok('Đã bỏ nhiệm vụ. Hài lòng của nhà vua -$pen.');
   }
+
+  /// Cộng/trừ Thánh ý (giới hạn 0..100). Điểm duy nhất thay đổi nguồn dữ liệu của thanh Thánh ý.
+  static void addSacredWill(GameState s, int d) => _addSat(s, d);
 
   static void _addSat(GameState s, int d) =>
       s.kingSatisfaction = (s.kingSatisfaction + d).clamp(0, 100);
@@ -1128,19 +1436,47 @@ class GameRules {
     if (m == null || m.status != MissionStatus.active) {
       return const ActionResult.fail('Nhiệm vụ không hoạt động.');
     }
+    if (s.day > m.deadline) {
+      return const ActionResult.fail('Nhiệm vụ đã hết hạn.');
+    }
     if (!missionReady(s, m)) {
       return const ActionResult.fail('Chưa đạt mục tiêu.');
+    }
+    return _settle(s, m);
+  }
+
+  /// Chốt hoàn thành và trao thưởng ĐÚNG MỘT LẦN (chốt bằng `status` + `rewarded`). Mọi thay đổi state
+  /// diễn ra sau khi mọi điều kiện đã kiểm tra, nên không có trạng thái trao dở dang.
+  static ActionResult _settle(GameState s, Mission m) {
+    if (m.rewarded || m.status != MissionStatus.active) {
+      return const ActionResult.fail('Nhiệm vụ đã được trao thưởng.');
     }
     final t = templateById(m.templateId);
     if (t.kind == MissionKind.deliver) {
       spend(s, {t.res!: t.amount});
     }
+    m.rewarded = true;
+    m.status = MissionStatus.completed;
+    m.targetId = null;
     grant(s, t.rewardRes);
     if (t.rewardItem != null) {
       s.inventory[t.rewardItem!] = (s.inventory[t.rewardItem!] ?? 0) + 1;
     }
-    _addSat(s, t.rewardSat);
-    m.status = MissionStatus.completed;
+    if (t.rewardSat > 0) addSacredWill(s, t.rewardSat);
+    final exp = <String>[];
+    if (t.rewardExp > 0) {
+      final ids = [
+        for (final id in m.squad)
+          if (s.soldier(id)?.alive == true) id,
+      ];
+      final who = ids.isEmpty
+          ? s.roster
+          : [for (final id in ids) s.soldier(id)!];
+      for (final so in who) {
+        final ups = addXp(so, t.rewardExp);
+        if (ups > 0) exp.add('${so.name} lên cấp ${so.level}');
+      }
+    }
     s.missionsCompleted++;
     s.addLog('Hoàn thành ${t.title}.');
     if (t.isFinal) {
@@ -1150,10 +1486,28 @@ class GameRules {
       );
     }
     fillBoard(s);
+    final parts = <String>[
+      if (t.rewardRes.isNotEmpty) describeCost(t.rewardRes),
+      if (t.rewardItem != null) itemDefs[t.rewardItem]!.name,
+      if (t.rewardExp > 0) '${t.rewardExp} EXP/người',
+      if (t.rewardSat > 0) 'Thánh ý +${t.rewardSat}',
+    ];
     return ActionResult.ok(
-      'Hoàn thành ${t.title}. Nhận ${describeCost(t.rewardRes)}'
-      '${t.rewardItem != null ? ' và ${itemDefs[t.rewardItem]!.name}' : ''}. Hài lòng +${t.rewardSat}.',
+      'Hoàn thành ${t.title}. Nhận ${parts.join(', ')}.'
+      '${exp.isEmpty ? '' : ' ${exp.join('; ')}.'}',
     );
+  }
+
+  /// Tự hoàn thành các nhiệm vụ đang làm đã đủ điều kiện và có mục tiêu tại [locId]
+  /// (đến nơi báo cáo, thắng trận, khám phá xong). Trả về thông báo của từng nhiệm vụ đã chốt.
+  static List<String> settleReadyAt(GameState s, String locId) {
+    final out = <String>[];
+    for (final m in activeAt(s, locId)) {
+      if (!missionReady(s, m)) continue;
+      final r = _settle(s, m);
+      if (r.ok) out.add(r.message);
+    }
+    return out;
   }
 
   // ---------- Qua ngày ----------
@@ -1173,6 +1527,8 @@ class GameRules {
       );
     }
     grant(s, stipend);
+    // Qua một ngày = nghỉ ngơi: thể lực của nhân vật hồi đầy (cơ chế hồi phục duy nhất).
+    s.hero.stamina = TerrainRules.maxStamina;
 
     final n = s.roster.length;
     final paid = s.res[Res.food]! >= n && s.res[Res.coins]! >= n;
@@ -1215,11 +1571,26 @@ class GameRules {
       final maxHp = so.maxHp;
       if (so.hp > maxHp) so.hp = maxHp;
       if (so.hp < maxHp) {
-        final frac = f?.type == FacilityType.infirmary
-            ? infirmaryHealFraction
-            : restHealFraction;
-        so.hp = min(maxHp, so.hp + max(1, (maxHp * frac).round()));
+        final heal = _infirmaryHeal(f?.type);
+        so.hp = heal != null
+            ? min(maxHp, so.hp + heal)
+            : min(maxHp, so.hp + max(1, (maxHp * restHealFraction).round()));
         if (so.hp >= maxHp) lines.add('${so.name} đã hồi phục hoàn toàn.');
+      }
+      _applyDailyPoints(
+        so,
+        f?.type ??
+            (level(s, Building.barracks) > 0 ? FacilityType.barracks : null),
+      );
+      // Luyện thành thạo vũ khí tại bãi tập (chỉ nhóm vũ khí hợp bãi, và chỉ tới bậc huấn luyện tối đa).
+      final fdef = f == null ? null : facilityDefs[f.type];
+      final wt = so.weaponId == null ? null : itemDefs[so.weaponId]?.weaponType;
+      if (fdef != null && wt != null && fdef.masteryTypes.contains(wt)) {
+        if (addMastery(so, wt, masteryTrainPerDay, trainingOnly: true) > 0) {
+          lines.add(
+            '${so.name} đạt bậc ${masteryRankNames[masteryRank(so, wt)]} với ${weaponProfiles[wt]!.name}.',
+          );
+        }
       }
       final st = f == null ? null : facilityDefs[f.type]!.trains;
       if (f != null && st != null) {
@@ -1274,6 +1645,30 @@ class GameRules {
     }
     dayHook?.call(s);
     return DayReport(stipend: stipend, upkeep: n, paid: paid, lines: lines);
+  }
+
+  /// HP hồi mỗi ngày nếu [t] có hiệu ứng HP (Lều cứu thương); null nếu không.
+  static int? _infirmaryHeal(FacilityType? t) {
+    if (t == null) return null;
+    for (final e in effectsOf(t)) {
+      if (e.stat == EffectStat.hp) return hpHealPerDay[e.level];
+    }
+    return null;
+  }
+
+  /// Áp năng lượng/tinh thần mỗi ngày theo [facilityEffects] của [t] (binh sĩ nhàn rỗi dùng Doanh trại).
+  static void _applyDailyPoints(Soldier so, FacilityType? t) {
+    if (t == null) return;
+    for (final e in effectsOf(t)) {
+      switch (e.stat) {
+        case EffectStat.energy:
+          so.energy = (so.energy + pointsPerDay[e.level]!).clamp(0, maxEnergy);
+        case EffectStat.morale:
+          so.morale = (so.morale + moralePerDay[e.level]!).clamp(0, 100);
+        default:
+          break;
+      }
+    }
   }
 
   // ---------- Bản đồ & khám phá ----------
@@ -1441,6 +1836,23 @@ class GameRules {
       if (kind != CasualtyKind.dead) {
         xp = 12 + 5 * o.kills + (won ? 15 : 0);
         ups = addXp(so, xp);
+        // Thành thạo nhóm vũ khí đang cầm: chỉ tăng nhờ số đòn trúng thật trong trận.
+        final wt = deriveStats(so).weaponType;
+        if (wt != null) {
+          final hits = rep.events
+              .where((e) => e.actor == so.id && e.hit)
+              .length;
+          final ranks = addMastery(
+            so,
+            wt,
+            min(masteryBattleCap, masteryBattleBase + hits),
+          );
+          if (ranks > 0) {
+            s.addLog(
+              '${so.name} đạt bậc ${masteryRankNames[masteryRank(so, wt)]} với ${weaponProfiles[wt]!.name}.',
+            );
+          }
+        }
         so.morale = (so.morale + (won ? 8 : -10)).clamp(0, 100);
       }
       out.add(Casualty(so.id, so.name, kind, xp: xp, levelUps: ups));
@@ -1544,7 +1956,7 @@ class GameRules {
             s.inventory[loc.lootItem!] = (s.inventory[loc.lootItem!] ?? 0) + 1;
             res.itemGained = loc.lootItem;
           }
-          _progressClear(s, loc.id, squad.length, res);
+          _progressClear(s, loc.id, squad, res);
           res.lines.add('Chiến thắng! ${loc.name} đã bị quét sạch.');
         } else {
           res.lines.add(
@@ -1574,6 +1986,8 @@ class GameRules {
         }
       case LocKind.city:
         s.visiting = loc.id;
+        final town = worldMap.townById(loc.id);
+        if (town != null) s.hero.position = town.position;
         res.city = loc.id;
         res.lines.add(
           'Đến ${loc.name}. Bạn có thể giao dịch với người bán tại đây.',
@@ -1626,6 +2040,15 @@ class GameRules {
             final t = templateById(m.templateId);
             if (t.kind == MissionKind.explore && t.regionId == loc.regionId) {
               m.progress++;
+              m.squad
+                ..clear()
+                ..addAll(squad.map((x) => x.id));
+              if (missionReady(s, m)) {
+                final r = _settle(s, m);
+                if (r.ok) res.missionNote = r.message;
+              } else {
+                m.targetId = objectiveFor(s, t, m.giverTown);
+              }
             }
           }
         }
@@ -1637,16 +2060,23 @@ class GameRules {
   static void _progressClear(
     GameState s,
     String locId,
-    int squadSize,
+    List<Soldier> squad,
     ExpeditionResult res,
   ) {
     for (final m in byStatus(s, MissionStatus.active)) {
       final t = templateById(m.templateId);
       if (t.kind == MissionKind.clear && t.locId == locId) {
-        if (squadSize >= t.minSoldiers) {
+        if (s.day > m.deadline) continue;
+        if (squad.length >= t.minSoldiers) {
           m.progress = 1;
-          res.missionNote =
-              'Mục tiêu nhiệm vụ "${t.title}" đã hoàn thành. Hãy báo cáo với nhà vua.';
+          m.squad
+            ..clear()
+            ..addAll(squad.map((x) => x.id));
+          // Thắng trận = hoàn thành mục tiêu: trao thưởng ngay, đúng một lần.
+          final r = _settle(s, m);
+          res.missionNote = r.ok
+              ? r.message
+              : 'Mục tiêu nhiệm vụ "${t.title}" đã hoàn thành.';
         } else {
           res.missionNote =
               'Đội quá nhỏ (${t.minSoldiers} yêu cầu) nên không tính cho nhiệm vụ "${t.title}".';

@@ -10,6 +10,7 @@ import '../../domain/catalog.dart';
 import '../../domain/models.dart';
 import '../../domain/rules.dart';
 import '../widgets/common.dart';
+import '../widgets/game_hud.dart';
 import 'tavern_screen.dart';
 import 'vendor_screen.dart';
 
@@ -32,44 +33,65 @@ class CityScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Pal.bg,
-      body: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.all(dims.pad),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 720;
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Padding(
+              padding: EdgeInsets.all(dims.pad),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 720;
 
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: _CityBuildings(
-                      cityName: city.name,
-                      vendors: vendors,
-                      state: state,
-                    ),
-                  ),
-                  SizedBox(width: dims.gap),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (arrival != null) ...[
-                          _ArrivalPanel(arrival: arrival!, compact: compact),
-                          SizedBox(height: dims.gap),
-                        ],
-
-                        Expanded(
-                          child: _QuestPanel(cityId: cityId, compact: compact),
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _CityBuildings(
+                          cityName: city.name,
+                          vendors: vendors,
+                          state: state,
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
+                      ),
+                      SizedBox(width: dims.gap),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (arrival != null) ...[
+                              _ArrivalPanel(
+                                arrival: arrival!,
+                                compact: compact,
+                              ),
+                              SizedBox(height: dims.gap),
+                            ],
+
+                            Expanded(
+                              child: _QuestPanel(
+                                cityId: cityId,
+                                compact: compact,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
-        ),
+          // HUD nổi: không chiếm chỗ trong layout, chỉ nút Menu nhận chạm.
+          const SafeArea(
+            child: Stack(
+              children: [
+                GameHudOverlay(
+                  insets: HudInsets(topBarTop: 4, resourceTop: 48),
+                  alignTopBar: Alignment.topRight,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1051,48 +1073,22 @@ class _QuestPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dữ liệu giao diện mẫu. Chưa gắn vào quest engine của game.
-    const goldenQuests = <_QuestData>[
-      _QuestData(
-        title: 'Áp tải hàng',
-        description: 'Hộ tống đoàn thương nhân.',
-        difficulty: 1,
-        isGolden: true,
-      ),
-      _QuestData(
-        title: 'Tìm thợ rèn',
-        description: 'Thu thập vật liệu quý.',
-        difficulty: 2,
-        isGolden: true,
-      ),
-      _QuestData(
-        title: 'Bảo vệ phố',
-        description: 'Dẹp nhóm gây rối.',
-        difficulty: 3,
-        isGolden: true,
-      ),
+    // Nhiệm vụ khả dụng thật từ bảng nhiệm vụ của game; chạm một thẻ để nhận (chỉ nhận được ở đây).
+    final controller = ControllerScope.of(context);
+    final state = controller.state!;
+    List<_QuestData> board(MissionColor color) => [
+      for (final m in GameRules.byStatus(state, MissionStatus.offered))
+        if (templateById(m.templateId).color == color)
+          _QuestData(
+            title: templateById(m.templateId).title,
+            description: templateById(m.templateId).desc,
+            difficulty: (templateById(m.templateId).tierMin + 1).clamp(1, 5),
+            isGolden: color == MissionColor.gold,
+            onTap: () => toast(context, controller.acceptMission(m.id)),
+          ),
     ];
-
-    const redQuests = <_QuestData>[
-      _QuestData(
-        title: 'Truy sát',
-        description: 'Săn toán cướp nguy hiểm.',
-        difficulty: 3,
-        isGolden: false,
-      ),
-      _QuestData(
-        title: 'Đột kích',
-        description: 'Đánh úp cứ điểm địch.',
-        difficulty: 4,
-        isGolden: false,
-      ),
-      _QuestData(
-        title: 'Ác chiến',
-        description: 'Đối đầu thủ lĩnh phản loạn.',
-        difficulty: 5,
-        isGolden: false,
-      ),
-    ];
+    final goldenQuests = board(MissionColor.gold);
+    final redQuests = board(MissionColor.red);
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1200,16 +1196,9 @@ class _QuestScrollCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: () {
-          toast(
-            context,
-            ActionResult.fail(
-              'Nhiệm vụ "${quest.title}" chưa được nối với hệ thống nhiệm vụ.',
-            ),
-          );
-        },
+        onTap: quest.onTap,
         child: SizedBox(
-          height: compact ? 108 : 118,
+          height: compact ? 124 : 134,
           child: Column(
             children: [
               // Cuộn giấy cổ với dải ruy băng nằm chính giữa.
@@ -1383,6 +1372,23 @@ class _QuestScrollCard extends StatelessWidget {
                 ),
               ),
 
+              // Tên nhiệm vụ (chạm thẻ để nhận).
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  quest.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: compact ? 10 : 11,
+                    fontWeight: FontWeight.w800,
+                    color: Pal.text,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+
               // Đầu lâu nằm riêng bên dưới cuộn giấy.
               Padding(
                 padding: const EdgeInsets.only(top: 1, bottom: 2),
@@ -1428,8 +1434,10 @@ class _QuestData {
     required this.description,
     required this.difficulty,
     required this.isGolden,
+    this.onTap,
   });
 
+  final VoidCallback? onTap;
   final String title;
   final String description;
   final int difficulty;

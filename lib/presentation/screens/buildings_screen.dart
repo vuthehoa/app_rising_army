@@ -1,12 +1,16 @@
+import 'package:app_rising_army/domain/models.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../domain/building_effects.dart';
 import '../../domain/catalog.dart';
+import '../../domain/progression.dart';
 import '../../domain/rules.dart';
 import '../widgets/art.dart';
 import '../widgets/camp/camp_build_menu.dart';
-import 'shell.dart';
 import '../widgets/common.dart';
+import '../widgets/stat_icon.dart';
+import 'shell.dart';
 
 class BuildingsScreen extends StatelessWidget {
   const BuildingsScreen({super.key});
@@ -17,24 +21,190 @@ class BuildingsScreen extends StatelessWidget {
     final s = c.state!;
     final d = Dims(context);
 
-    // Danh sách và trạng thái lấy từ catalog trại chuẩn; xây qua controller (cùng action với menu Build của trại).
     final buildings = Panel(
       title: 'Công trình của trại',
       child: Column(
         children: [
-          for (final d in campBuildings)
-            CampBuildTile(
-              status: GameRules.campStatus(s, d),
-              state: s,
-              onSelected: () {
-                // Cùng luồng với menu Build: xây mới → sang trại để chọn vị trí; nâng cấp → thực hiện ngay.
-                final r = c.chooseCampBuilding(d);
-                toast(context, r);
-                if (r.ok && c.placing != null) {
-                  context.getInheritedWidgetOfExactType<ShellNav>()?.go(
-                    Sections.camp,
-                  );
-                }
+          for (final building in campBuildings)
+            Builder(
+              builder: (tileContext) {
+                final status = GameRules.campStatus(s, building);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      CampBuildTile(
+                        status: status,
+                        state: s,
+                        onSelected: () {
+                          // Công trình đã xây không được xây lại,
+                          // nhưng vẫn cho phép nâng cấp nếu hợp lệ.
+                          if (status.built && !status.isUpgrade) {
+                            toast(
+                              context,
+                              'Công trình này đã được xây dựng.'
+                                  as ActionResult,
+                            );
+                            return;
+                          }
+
+                          if (!status.canAct) {
+                            return;
+                          }
+
+                          // Giữ nguyên luồng xử lý của controller.
+                          final result = c.chooseCampBuilding(building);
+                          toast(context, result);
+
+                          if (result.ok && c.placing != null) {
+                            context
+                                .getInheritedWidgetOfExactType<ShellNav>()
+                                ?.go(Sections.camp);
+                          }
+                        },
+                        onShowInfo: () {
+                          // Hiển thị thông tin chi tiết của công trình.
+                          showDialog<void>(
+                            context: tileContext,
+                            builder: (dialogContext) {
+                              return AlertDialog(
+                                title: Text(building.name),
+                                content: SingleChildScrollView(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      SizedBox(
+                                        height: 120,
+                                        width: double.infinity,
+                                        child: campBuildingArt(building),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(building.blurb),
+                                      if (displayEffectsOf(building.facility!)
+                                          .isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        BuildingEffectIcons(
+                                          displayEffectsOf(building.facility!),
+                                          onDark: true,
+                                        ),
+                                      ],
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        status.built
+                                            ? 'Trạng thái: Đã xây'
+                                            : status.canAct
+                                            ? 'Trạng thái: Có thể xây'
+                                            : 'Trạng thái: Chưa thể xây',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+
+                                      if (status.cost != null) ...[
+                                        const SizedBox(height: 12),
+                                        const Text(
+                                          'Chi phí',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        CostText(status.cost!, state: s),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialogContext),
+                                    child: const Text('Đóng'),
+                                  ),
+                                  if (!status.built || status.isUpgrade)
+                                    FilledButton(
+                                      onPressed: status.canAct
+                                          ? () {
+                                              Navigator.pop(dialogContext);
+
+                                              final result = c
+                                                  .chooseCampBuilding(building);
+                                              toast(context, result);
+
+                                              if (result.ok &&
+                                                  c.placing != null) {
+                                                context
+                                                    .getInheritedWidgetOfExactType<
+                                                      ShellNav
+                                                    >()
+                                                    ?.go(Sections.camp);
+                                              }
+                                            }
+                                          : null,
+                                      child: Text(
+                                        status.isUpgrade
+                                            ? 'Nâng cấp'
+                                            : 'Xây công trình',
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () {
+                            // Nhấn phần tên hoặc mô tả cũng mở thông tin.
+                            showDialog<void>(
+                              context: tileContext,
+                              builder: (dialogContext) {
+                                return AlertDialog(
+                                  title: Text(building.name),
+                                  content: Text(building.blurb),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(dialogContext),
+                                      child: const Text('Đóng'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 4,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  building.name,
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: status.built
+                                            ? Colors.grey
+                                            : null,
+                                      ),
+                                ),
+                                const SizedBox(height: 4),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
               },
             ),
         ],
@@ -42,9 +212,10 @@ class BuildingsScreen extends StatelessWidget {
     );
 
     final inventoryItems = [
-      for (final e in s.inventory.entries)
-        if (e.value > 0) (itemDefs[e.key]!, e.value),
+      for (final entry in s.inventory.entries)
+        if (entry.value > 0) (itemDefs[entry.key]!, entry.value),
     ];
+
     final inventory = Panel(
       title:
           'Kho đồ ${GameRules.inventoryCount(s)}/${GameRules.inventoryCapacity(s)} • ${GameRules.chestCount(s)} hòm',
@@ -54,17 +225,18 @@ class BuildingsScreen extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final e in inventoryItems)
+                for (final entry in inventoryItems)
                   Tooltip(
-                    message: '${e.$1.name} ×${e.$2}\n${_line(e.$1)}',
+                    message:
+                        '${entry.$1.name} ×${entry.$2}\n${_line(entry.$1)}',
                     child: Stack(
                       children: [
-                        ItemGlyph(e.$1.id, size: 42),
+                        ItemGlyph(entry.$1.id, size: 42),
                         Positioned(
                           right: 1,
                           bottom: 0,
                           child: Text(
-                            '${e.$2}',
+                            '${entry.$2}',
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
                               fontSize: 11,
@@ -95,16 +267,16 @@ class BuildingsScreen extends StatelessWidget {
     );
   }
 
-  static String _line(ItemDef it) => [
-    if (it.damage > 0) 'Công +${it.damage}',
-    if (it.defense > 0) 'Giáp +${it.defense}',
-    if (it.speed != 0) 'Tốc ${it.speed > 0 ? '+' : ''}${it.speed}',
-    for (final b in it.bonus.entries) '${statNames[b.key]} +${b.value}',
-    if (it.roles.length < 3) roleNamesOf(it),
-    if (it.reqLevel > 1) 'Cấp ${it.reqLevel}+',
-    if (it.reqStr > 0) 'SM ${it.reqStr}+',
+  static String _line(ItemDef item) => [
+    if (item.damage > 0) 'Công +${item.damage}',
+    if (item.defense > 0) 'Giáp +${item.defense}',
+    if (item.speed != 0) 'Tốc ${item.speed > 0 ? '+' : ''}${item.speed}',
+    for (final bonus in item.bonus.entries)
+      '${statNames[bonus.key]} +${bonus.value}',
+    if (item.weaponType != null)
+      '${weaponProfiles[item.weaponType]!.name} • ${item.interval.toStringAsFixed(1)}s • ${item.range.toStringAsFixed(1)}m',
+    if (item.totalArmorPen > 0) 'Xuyên giáp ${item.totalArmorPen}',
+    if (item.reqLevel > 1) 'Cấp ${item.reqLevel}+',
+    if (item.reqStr > 0) 'SM ${item.reqStr}+',
   ].join(' • ');
-
-  static String roleNamesOf(ItemDef it) =>
-      it.roles.map((r) => roleNames[r]).join('/');
 }

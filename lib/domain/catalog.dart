@@ -1,5 +1,6 @@
 import 'item_grade.dart';
 import 'models.dart';
+import 'progression.dart';
 
 /// Toàn bộ dữ liệu có cấu trúc của game. Thêm vật phẩm/địa điểm/nhiệm vụ = thêm dòng ở đây,
 /// không sửa widget hay luật.
@@ -58,6 +59,7 @@ const slotNames = <Slot, String>{
   Slot.weapon: 'Vũ khí',
   Slot.armor: 'Áo giáp',
   Slot.shield: 'Khiên',
+  Slot.helmet: 'Mũ',
   Slot.accessory: 'Phụ kiện',
 };
 
@@ -107,7 +109,10 @@ class ItemDef {
     required this.slot,
     required this.tier,
     required this.price,
-    this.roles = const {Role.spearman, Role.archer, Role.cavalry},
+    this.weaponType,
+    this.armorPen = 0,
+    this.intervalMod = 0,
+    this.requiredLevel,
     this.damage = 0,
     this.defense = 0,
     this.speed = 0,
@@ -120,7 +125,22 @@ class ItemDef {
   final Slot slot;
   final int tier;
   final int price;
-  final Set<Role> roles;
+
+  /// Nhóm vũ khí (chỉ với [Slot.weapon]); quyết định tầm đánh, nhịp đánh, chính xác, chí mạng, xuyên giáp
+  /// cơ bản qua [weaponProfiles]. Không có điều kiện nghề.
+  final WeaponType? weaponType;
+
+  /// Xuyên giáp riêng của món này, cộng thêm xuyên giáp của nhóm.
+  final int armorPen;
+
+  /// Chênh lệch thời gian giữa hai đòn so với nhóm (món nặng hơn thì dương).
+  final double intervalMod;
+
+  /// Cấp binh sĩ tối thiểu; null = suy ra từ phẩm cấp ([requiredHeroLevel]). Độc lập với phẩm cấp.
+  final int? requiredLevel;
+
+  WeaponProfile? get profile =>
+      weaponType == null ? null : weaponProfiles[weaponType];
   final int damage;
   final int defense;
   final int speed;
@@ -132,46 +152,49 @@ class ItemDef {
 
   /// Cấp anh hùng tối thiểu để dùng: `hero.level >= reqLevel` (Level 1: không có điều kiện bổ sung).
   /// Suy ra từ phẩm cấp, không lưu riêng, nên không thể lệch khỏi quy tắc.
-  int get reqLevel => requiredHeroLevel(tier);
-}
+  int get reqLevel => requiredLevel ?? requiredHeroLevel(tier);
 
-const melee = {Role.spearman, Role.cavalry};
+  /// Thời gian giữa hai đòn (giây) / tầm đánh / xuyên giáp tổng của món vũ khí (0 nếu không phải vũ khí).
+  double get interval => (profile?.interval ?? 0) + intervalMod;
+  double get range => profile?.range ?? 0;
+  int get totalArmorPen => (profile?.armorPen ?? 0) + armorPen;
+}
 
 const itemDefs = <String, ItemDef>{
   'wooden_spear': ItemDef(
     id: 'wooden_spear',
     name: 'Giáo gỗ',
     slot: Slot.weapon,
+    weaponType: WeaponType.spear,
     tier: 1,
     price: 20,
-    roles: melee,
     damage: 4,
   ),
   'iron_spear': ItemDef(
     id: 'iron_spear',
     name: 'Giáo sắt',
     slot: Slot.weapon,
+    weaponType: WeaponType.spear,
     tier: 2,
     price: 60,
-    roles: melee,
     damage: 7,
   ),
   'steel_pike': ItemDef(
     id: 'steel_pike',
     name: 'Trường thương thép',
     slot: Slot.weapon,
+    weaponType: WeaponType.spear,
     tier: 3,
     price: 140,
-    roles: melee,
     damage: 10,
   ),
   'short_sword': ItemDef(
     id: 'short_sword',
     name: 'Kiếm ngắn',
     slot: Slot.weapon,
+    weaponType: WeaponType.sword,
     tier: 1,
     price: 25,
-    roles: melee,
     damage: 5,
     speed: 1,
   ),
@@ -179,9 +202,9 @@ const itemDefs = <String, ItemDef>{
     id: 'arming_sword',
     name: 'Kiếm chiến',
     slot: Slot.weapon,
+    weaponType: WeaponType.sword,
     tier: 2,
     price: 70,
-    roles: melee,
     damage: 8,
     speed: 1,
   ),
@@ -189,36 +212,36 @@ const itemDefs = <String, ItemDef>{
     id: 'riders_lance',
     name: 'Thương kỵ sĩ',
     slot: Slot.weapon,
+    weaponType: WeaponType.spear,
     tier: 2,
     price: 80,
-    roles: {Role.cavalry},
     damage: 9,
   ),
   'hunting_bow': ItemDef(
     id: 'hunting_bow',
     name: 'Cung săn',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 1,
     price: 20,
-    roles: {Role.archer},
     damage: 4,
   ),
   'long_bow': ItemDef(
     id: 'long_bow',
     name: 'Trường cung',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 2,
     price: 60,
-    roles: {Role.archer},
     damage: 7,
   ),
   'war_bow': ItemDef(
     id: 'war_bow',
     name: 'Cung chiến',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 3,
     price: 140,
-    roles: {Role.archer},
     damage: 10,
   ),
   'padded_armor': ItemDef(
@@ -317,54 +340,54 @@ const itemDefs = <String, ItemDef>{
     id: 'knight_sword',
     name: 'Kiếm hiệp sĩ',
     slot: Slot.weapon,
+    weaponType: WeaponType.sword,
     tier: 4,
     price: 260,
-    roles: melee,
     damage: 13,
   ),
   'composite_bow': ItemDef(
     id: 'composite_bow',
     name: 'Cung phức hợp',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 4,
     price: 260,
-    roles: {Role.archer},
     damage: 13,
   ),
   'royal_sword': ItemDef(
     id: 'royal_sword',
     name: 'Kiếm hoàng gia',
     slot: Slot.weapon,
+    weaponType: WeaponType.sword,
     tier: 5,
     price: 420,
-    roles: melee,
     damage: 16,
   ),
   'dragon_bow': ItemDef(
     id: 'dragon_bow',
     name: 'Cung long cốt',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 5,
     price: 420,
-    roles: {Role.archer},
     damage: 16,
   ),
   'sun_blade': ItemDef(
     id: 'sun_blade',
     name: 'Kiếm Thái Dương',
     slot: Slot.weapon,
+    weaponType: WeaponType.sword,
     tier: 6,
     price: 700,
-    roles: melee,
     damage: 20,
   ),
   'sky_bow': ItemDef(
     id: 'sky_bow',
     name: 'Cung Thiên Vũ',
     slot: Slot.weapon,
+    weaponType: WeaponType.bow,
     tier: 6,
     price: 700,
-    roles: {Role.archer},
     damage: 20,
   ),
   'half_plate': ItemDef(
@@ -447,6 +470,196 @@ const itemDefs = <String, ItemDef>{
     price: 680,
     defense: 6,
     reqStr: 15,
+  ),
+  'bastard_sword': ItemDef(
+    id: 'bastard_sword',
+    name: 'Kiếm lai',
+    slot: Slot.weapon,
+    weaponType: WeaponType.sword,
+    tier: 3,
+    price: 150,
+    damage: 11,
+  ),
+  'dagger': ItemDef(
+    id: 'dagger',
+    name: 'Dao găm',
+    slot: Slot.weapon,
+    weaponType: WeaponType.dagger,
+    tier: 1,
+    price: 18,
+    damage: 3,
+    speed: 1,
+  ),
+  'stiletto': ItemDef(
+    id: 'stiletto',
+    name: 'Chủy thủ',
+    slot: Slot.weapon,
+    weaponType: WeaponType.dagger,
+    tier: 3,
+    price: 120,
+    damage: 6,
+    armorPen: 2,
+    speed: 1,
+  ),
+  'assassin_dirk': ItemDef(
+    id: 'assassin_dirk',
+    name: 'Dao sát thủ',
+    slot: Slot.weapon,
+    weaponType: WeaponType.dagger,
+    tier: 5,
+    price: 400,
+    damage: 10,
+    armorPen: 3,
+    speed: 1,
+  ),
+  'woodcutter_axe': ItemDef(
+    id: 'woodcutter_axe',
+    name: 'Rìu thợ rừng',
+    slot: Slot.weapon,
+    weaponType: WeaponType.axe,
+    tier: 1,
+    price: 24,
+    damage: 6,
+    armorPen: 1,
+  ),
+  'battle_axe': ItemDef(
+    id: 'battle_axe',
+    name: 'Rìu chiến',
+    slot: Slot.weapon,
+    weaponType: WeaponType.axe,
+    tier: 3,
+    price: 150,
+    damage: 14,
+    reqStr: 9,
+  ),
+  'great_axe': ItemDef(
+    id: 'great_axe',
+    name: 'Rìu lớn',
+    slot: Slot.weapon,
+    weaponType: WeaponType.axe,
+    tier: 5,
+    price: 440,
+    damage: 28,
+    armorPen: 1,
+    intervalMod: 0.4,
+    reqStr: 14,
+    speed: -1,
+  ),
+  'spiked_club': ItemDef(
+    id: 'spiked_club',
+    name: 'Gậy đinh',
+    slot: Slot.weapon,
+    weaponType: WeaponType.mace,
+    tier: 2,
+    price: 75,
+    damage: 11,
+    reqStr: 8,
+  ),
+  'flanged_mace': ItemDef(
+    id: 'flanged_mace',
+    name: 'Chùy gai',
+    slot: Slot.weapon,
+    weaponType: WeaponType.mace,
+    tier: 4,
+    price: 270,
+    damage: 18,
+    reqStr: 10,
+  ),
+  'war_hammer': ItemDef(
+    id: 'war_hammer',
+    name: 'Búa chiến',
+    slot: Slot.weapon,
+    weaponType: WeaponType.mace,
+    tier: 6,
+    price: 710,
+    damage: 28,
+    armorPen: 2,
+    reqStr: 15,
+    speed: -1,
+  ),
+  'light_crossbow': ItemDef(
+    id: 'light_crossbow',
+    name: 'Nỏ nhẹ',
+    slot: Slot.weapon,
+    weaponType: WeaponType.crossbow,
+    tier: 2,
+    price: 90,
+    damage: 10,
+  ),
+  'heavy_crossbow': ItemDef(
+    id: 'heavy_crossbow',
+    name: 'Nỏ nặng',
+    slot: Slot.weapon,
+    weaponType: WeaponType.crossbow,
+    tier: 4,
+    price: 290,
+    damage: 19,
+    reqStr: 9,
+  ),
+  'siege_crossbow': ItemDef(
+    id: 'siege_crossbow',
+    name: 'Nỏ công thành',
+    slot: Slot.weapon,
+    weaponType: WeaponType.crossbow,
+    tier: 6,
+    price: 740,
+    damage: 30,
+    armorPen: 2,
+    reqStr: 12,
+    speed: -1,
+  ),
+  'leather_cap': ItemDef(
+    id: 'leather_cap',
+    name: 'Mũ da',
+    slot: Slot.helmet,
+    tier: 1,
+    price: 12,
+    defense: 1,
+  ),
+  'iron_helm': ItemDef(
+    id: 'iron_helm',
+    name: 'Mũ sắt',
+    slot: Slot.helmet,
+    tier: 2,
+    price: 55,
+    defense: 2,
+  ),
+  'steel_helm': ItemDef(
+    id: 'steel_helm',
+    name: 'Mũ thép',
+    slot: Slot.helmet,
+    tier: 3,
+    price: 120,
+    defense: 3,
+  ),
+  'great_helm': ItemDef(
+    id: 'great_helm',
+    name: 'Mũ giáp lớn',
+    slot: Slot.helmet,
+    tier: 4,
+    price: 240,
+    defense: 4,
+    reqStr: 11,
+    speed: -1,
+  ),
+  'knight_helm': ItemDef(
+    id: 'knight_helm',
+    name: 'Mũ kỵ sĩ',
+    slot: Slot.helmet,
+    tier: 5,
+    price: 380,
+    defense: 5,
+    reqStr: 13,
+    speed: -1,
+  ),
+  'dragon_helm': ItemDef(
+    id: 'dragon_helm',
+    name: 'Mũ vảy rồng',
+    slot: Slot.helmet,
+    tier: 6,
+    price: 650,
+    defense: 6,
+    reqStr: 14,
   ),
 };
 
@@ -734,6 +947,28 @@ const locations = <LocationDef>[
     startsDiscovered: true,
     blurb: 'Chợ đen ven đầm: hàng hiếm, giá đắt.',
   ),
+  LocationDef(
+    id: 's_ford',
+    name: 'Làng Bến Nam',
+    regionId: 'greenvale',
+    kind: LocKind.city,
+    days: 1,
+    x: 0.38,
+    y: 0.9,
+    startsDiscovered: true,
+    blurb: 'Làng ven bến sông phía nam, chợ nhỏ nhưng đủ dùng.',
+  ),
+  LocationDef(
+    id: 'n_keep',
+    name: 'Quan ải Bắc Phong',
+    regionId: 'ashen',
+    kind: LocKind.city,
+    days: 2,
+    x: 0.5,
+    y: 0.1,
+    startsDiscovered: true,
+    blurb: 'Pháo đài gác cửa ngõ phía bắc, nhiều binh khí tốt.',
+  ),
 ];
 
 LocationDef? locationById(String id) {
@@ -746,6 +981,13 @@ LocationDef? locationById(String id) {
 RegionDef regionById(String id) => regions.firstWhere((r) => r.id == id);
 
 enum MissionKind { clear, deliver, levelCount, explore, visit, gearCount }
+
+/// Loại nhiệm vụ theo phần thưởng mặc định:
+/// * [gold] (vàng): tiền (và tài nguyên nếu có trong [MissionTemplate.rewardRes]) + Thánh ý
+///   ([MissionTemplate.rewardSat]);
+/// * [red] (đỏ): tiền, tài nguyên và kinh nghiệm ([MissionTemplate.rewardExp]); không cộng Thánh ý
+///   trừ khi mẫu đặt `rewardSat` > 0.
+enum MissionColor { gold, red }
 
 class MissionTemplate {
   const MissionTemplate({
@@ -768,10 +1010,18 @@ class MissionTemplate {
     this.rewardRes = const {},
     this.rewardItem,
     this.isFinal = false,
+    this.color = MissionColor.gold,
+    this.rewardExp = 0,
   });
 
   final String id;
   final MissionKind kind;
+
+  /// Màu nhiệm vụ (quyết định bảng nhận thưởng mặc định).
+  final MissionColor color;
+
+  /// Kinh nghiệm cộng cho MỖI binh sĩ tham gia (đội thắng trận / đội khám phá).
+  final int rewardExp;
   final String title;
   final String desc;
   final int days;
@@ -802,7 +1052,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Dẹp trại cướp đường',
     desc: 'Nhà vua muốn con đường thương mại được thông. Tiêu diệt trại cướp.',
     days: 8,
-    rewardSat: 10,
+    rewardSat: 0,
+    rewardExp: 40,
+    color: MissionColor.red,
     penaltySat: 8,
     rewardRes: {Res.coins: 80, Res.food: 40},
   ),
@@ -855,7 +1107,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Thám hiểm Thung Lũng',
     desc: 'Khám phá một tàn tích ở Thung Lũng Xanh.',
     days: 9,
-    rewardSat: 6,
+    rewardSat: 0,
+    rewardExp: 30,
+    color: MissionColor.red,
     penaltySat: 4,
     rewardRes: {Res.coins: 50, Res.wood: 30},
   ),
@@ -869,7 +1123,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Phá tiền đồn',
     desc: 'Tiền đồn cướp đe dọa biên giới. Hạ gục chúng.',
     days: 10,
-    rewardSat: 10,
+    rewardSat: 0,
+    rewardExp: 60,
+    color: MissionColor.red,
     penaltySat: 8,
     rewardRes: {Res.coins: 150, Res.iron: 40},
   ),
@@ -883,7 +1139,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Diệt hang ổ cướp',
     desc: 'Hang ổ kẻ cướp là cái gai của vương quốc.',
     days: 12,
-    rewardSat: 12,
+    rewardSat: 0,
+    rewardExp: 70,
+    color: MissionColor.red,
     penaltySat: 9,
     rewardRes: {Res.coins: 200, Res.food: 60},
   ),
@@ -923,7 +1181,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Bí mật Đồi Tro',
     desc: 'Khám phá một tàn tích ở Đồi Tro.',
     days: 12,
-    rewardSat: 7,
+    rewardSat: 0,
+    rewardExp: 40,
+    color: MissionColor.red,
     penaltySat: 5,
     rewardRes: {Res.coins: 120},
   ),
@@ -936,7 +1196,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Đánh bại lính đánh thuê',
     desc: 'Lính đánh thuê của lãnh chúa đóng ở đầm lầy.',
     days: 14,
-    rewardSat: 12,
+    rewardSat: 0,
+    rewardExp: 90,
+    color: MissionColor.red,
     penaltySat: 10,
     rewardRes: {Res.coins: 260, Res.iron: 60},
   ),
@@ -963,7 +1225,9 @@ const missionTemplates = <MissionTemplate>[
     title: 'Hạ lãnh chúa nổi loạn',
     desc: 'Nhiệm vụ cuối cùng: công phá pháo đài lãnh chúa và chấm dứt cuộc nổi loạn.',
     days: 20,
-    rewardSat: 100,
+    rewardSat: 0,
+    rewardExp: 200,
+    color: MissionColor.red,
     penaltySat: 50,
     rewardRes: {Res.coins: 500},
   ),
@@ -1221,6 +1485,12 @@ const vendors = <VendorDef>[
     blurb: 'Vũ khí, giáp và khiên phẩm cấp 1–2.',
     priceMult: 1.1,
     items: {
+      'dagger': 4,
+      'woodcutter_axe': 3,
+      'light_crossbow': 1,
+      'spiked_club': 1,
+      'leather_cap': 4,
+      'iron_helm': 1,
       'wooden_spear': 5,
       'short_sword': 4,
       'hunting_bow': 5,
@@ -1266,6 +1536,14 @@ const vendors = <VendorDef>[
     blurb: 'Trang bị phẩm cấp 2–3.',
     priceMult: 1.2,
     items: {
+      'dagger': 2,
+      'bastard_sword': 1,
+      'battle_axe': 1,
+      'stiletto': 1,
+      'light_crossbow': 2,
+      'spiked_club': 2,
+      'iron_helm': 3,
+      'steel_helm': 1,
       'iron_spear': 3,
       'arming_sword': 3,
       'riders_lance': 2,
@@ -1312,6 +1590,18 @@ const vendors = <VendorDef>[
     priceMult: 1.4,
     unlockTier: 1,
     items: {
+      'dagger': 3,
+      'stiletto': 1,
+      'woodcutter_axe': 3,
+      'battle_axe': 1,
+      'light_crossbow': 2,
+      'flanged_mace': 1,
+      'heavy_crossbow': 1,
+      'steel_helm': 2,
+      'great_helm': 1,
+      'knight_helm': 1,
+      'assassin_dirk': 1,
+      'great_axe': 1,
       'steel_pike': 2,
       'war_bow': 2,
       'plate_armor': 2,
@@ -1333,6 +1623,104 @@ const vendors = <VendorDef>[
     kind: VendorKind.tavern,
     blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
     priceMult: 1.4,
+  ),
+  // ---- Làng Bến Nam ----
+  VendorDef(
+    id: 's_market',
+    cityId: 's_ford',
+    name: 'Chợ Bến Nam',
+    kind: VendorKind.market,
+    blurb: 'Chợ làng: lương thực, gỗ và vải theo lô.',
+    priceMult: 1.0,
+    resources: {
+      Res.food: 18,
+      Res.tools: 4,
+      Res.iron: 4,
+      Res.stone: 8,
+      Res.wood: 14,
+      Res.cloth: 10,
+    },
+  ),
+  VendorDef(
+    id: 's_smith',
+    cityId: 's_ford',
+    name: 'Lò rèn Bến Nam',
+    kind: VendorKind.smithy,
+    blurb: 'Vũ khí, giáp và khiên phẩm cấp 1–2.',
+    priceMult: 1.1,
+    items: {
+      'dagger': 3,
+      'woodcutter_axe': 3,
+      'leather_cap': 4,
+      'iron_helm': 1,
+      'wooden_spear': 4,
+      'short_sword': 4,
+      'hunting_bow': 4,
+      'iron_spear': 1,
+      'padded_armor': 5,
+      'leather_armor': 4,
+      'wooden_shield': 4,
+      'round_shield': 1,
+    },
+  ),
+  VendorDef(
+    id: 's_tavern',
+    cityId: 's_ford',
+    name: 'Quán rượu Bến Nam',
+    kind: VendorKind.tavern,
+    blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
+    priceMult: 1.0,
+  ),
+  // ---- Quan ải Bắc Phong ----
+  VendorDef(
+    id: 'n_market',
+    cityId: 'n_keep',
+    name: 'Chợ Bắc Phong',
+    kind: VendorKind.market,
+    blurb: 'Chợ quan ải: sắt, đá và công cụ.',
+    priceMult: 1.15,
+    resources: {
+      Res.food: 12,
+      Res.tools: 8,
+      Res.iron: 10,
+      Res.stone: 12,
+      Res.wood: 8,
+      Res.cloth: 6,
+    },
+  ),
+  VendorDef(
+    id: 'n_arms',
+    cityId: 'n_keep',
+    name: 'Xưởng binh khí Bắc Phong',
+    kind: VendorKind.smithy,
+    blurb: 'Trang bị phẩm cấp 2–3 cho lính biên phòng.',
+    priceMult: 1.2,
+    items: {
+      'bastard_sword': 1,
+      'battle_axe': 2,
+      'spiked_club': 2,
+      'light_crossbow': 2,
+      'heavy_crossbow': 1,
+      'iron_helm': 3,
+      'steel_helm': 2,
+      'great_helm': 1,
+      'iron_spear': 3,
+      'arming_sword': 3,
+      'long_bow': 3,
+      'riders_lance': 1,
+      'chain_mail': 3,
+      'plate_armor': 1,
+      'round_shield': 3,
+      'kite_shield': 1,
+    },
+  ),
+  VendorDef(
+    id: 'n_tavern',
+    cityId: 'n_keep',
+    name: 'Quán rượu Bắc Phong',
+    kind: VendorKind.tavern,
+    blurb: 'Chiêu mộ anh hùng cấp 1–3 bằng vàng.',
+    priceMult: 1.2,
   ),
 ];
 
@@ -1356,6 +1744,7 @@ class FacilityDef {
     this.blurb,
     this.cost, {
     this.trains,
+    this.masteryTypes = const {},
     this.verified = false,
     this.maxCount = 1,
     this.takesAssignment = true,
@@ -1368,6 +1757,9 @@ class FacilityDef {
 
   /// Thuộc tính được huấn luyện (null nếu không phải công trình huấn luyện).
   final Stat? trains;
+
+  /// Nhóm vũ khí được luyện thành thạo ở đây (binh sĩ cầm đúng nhóm này mới được cộng).
+  final Set<WeaponType> masteryTypes;
 
   /// Tên/hiệu ứng được xác minh trực tiếp bằng ảnh/clip chính thức.
   final bool verified;
@@ -1388,12 +1780,20 @@ const facilityDefs = <FacilityType, FacilityDef>{
     'Bù nhìn tập đánh: huấn luyện Sức mạnh. Tối đa 3 người.',
     {Res.wood: 40, Res.coins: 30},
     trains: Stat.str,
+    masteryTypes: {
+      WeaponType.sword,
+      WeaponType.dagger,
+      WeaponType.axe,
+      WeaponType.mace,
+      WeaponType.spear,
+    },
   ),
   FacilityType.archeryRange: FacilityDef(
     'Bãi bắn cung',
-    'Bia bắn: huấn luyện Khéo léo. Tối đa 3 người.',
+    'Bia bắn: huấn luyện Sức mạnh (4 ngày +1). Tối đa 3 người.',
     {Res.wood: 40, Res.coins: 30},
-    trains: Stat.dex,
+    trains: Stat.str,
+    masteryTypes: {WeaponType.bow, WeaponType.crossbow},
   ),
   // Id kỹ thuật `enduranceYard` được giữ nguyên để tương thích save; tên hiển thị là Bãi đá.
   FacilityType.enduranceYard: FacilityDef(
@@ -1513,6 +1913,18 @@ const campBuildings = <CampBuildingDef>[
   ),
 ];
 
+/// Chi phí NÂNG CẤP SLOT (3 → 6) của công trình nhận binh sĩ, một lần duy nhất (PROPOSED: game chưa quy định;
+/// tách riêng để chỉnh sau). Doanh trại dùng hệ cấp bậc có sẵn ([upgradeCosts]) nên không nằm ở đây.
+const facilityUpgradeCosts = <FacilityType, Cost>{
+  FacilityType.enduranceYard: {Res.wood: 90, Res.iron: 20, Res.coins: 60},
+  FacilityType.archeryRange: {Res.wood: 80, Res.coins: 60},
+  FacilityType.meleeYard: {Res.wood: 80, Res.coins: 60},
+  FacilityType.infirmary: {Res.wood: 80, Res.coins: 80},
+};
+
+/// Giá hồi sinh một binh sĩ đã tử trận, bằng vàng (PROPOSED: game chưa quy định; tách riêng để chỉnh sau).
+int reviveCost(Soldier s) => 50 + 25 * s.level;
+
 /// Số công trình tối đa trong trại (PROPOSED).
 const maxFacilities = 9;
 
@@ -1521,4 +1933,3 @@ const trainPercentPerDay = 25;
 
 /// Hồi HP mỗi ngày theo tỷ lệ HP tối đa (PROPOSED).
 const restHealFraction = 0.10;
-const infirmaryHealFraction = 0.40;
