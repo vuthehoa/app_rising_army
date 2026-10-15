@@ -4,16 +4,22 @@ import '../../../application/game_controller.dart';
 import '../../../core/theme.dart';
 import '../../../domain/building_effects.dart';
 import '../../../domain/catalog.dart';
+import '../../../domain/equipment/equipment_loadout.dart';
 import '../../../domain/models.dart';
 import '../../../domain/rules.dart';
 import '../../../domain/stats.dart';
 import '../art.dart';
 import '../common.dart';
+import '../equipment/equipment_widgets.dart';
+import '../item_kit.dart';
+import '../rename_dialog.dart';
+import '../soldier_condition_widgets.dart';
 import '../stat_icon.dart';
 
 /// Popup thông tin binh sĩ mở khi chạm vào lính trong Trại. Trái: nhân vật; phải: Hòm đồ của nhân vật
 /// (kho đồ chung của quân đội, KHÔNG phải công trình Hòm đồ trên Trại). Chỉ hiển thị dữ liệu thật và đổi
-/// tên qua [GameController.rename]; không trang bị/bán/vứt vật phẩm.
+/// tên qua [GameController.rename]. Trang bị bằng KÉO-THẢ giữa Hòm đồ và ba ô Giáp/Khiên/Vũ khí (chạm chỉ mở popup
+/// chi tiết dùng chung); mọi thay đổi đi qua [GameController], hình nhân vật ở đây cập nhật theo.
 Future<void> showSoldierInfoDialog(
   BuildContext context,
   GameController controller,
@@ -97,17 +103,32 @@ class _SoldierInfoDialogState extends State<SoldierInfoDialog> {
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: _Panel(
-                          key: const ValueKey('soldier-inventory-panel'),
-                          child: _InventoryPanel(
-                            state: s,
-                            filter: _filter,
-                            page: _page,
-                            onFilter: (f) => setState(() {
-                              _filter = f;
-                              _page = 0;
-                            }),
-                            onPage: (p) => setState(() => _page = p),
+                        child: ItemDropZone<GearDrag>(
+                          key: const ValueKey('drop-chest'),
+                          // Kéo trang bị từ ô của chính lính này về Hòm đồ = tháo.
+                          accepts: (d) => !d.fromChest && d.soldierId == so.id,
+                          onDrop: (d) => toast(
+                            context,
+                            widget.controller.unequip(so.id, d.fromSlot!),
+                          ),
+                          child: _Panel(
+                            key: const ValueKey('soldier-inventory-panel'),
+                            child: _InventoryPanel(
+                              state: s,
+                              filter: _filter,
+                              page: _page,
+                              onFilter: (f) => setState(() {
+                                _filter = f;
+                                _page = 0;
+                              }),
+                              onPage: (p) => setState(() => _page = p),
+                              onOpen: (ref) => showGearDetail(
+                                context,
+                                widget.controller,
+                                so,
+                                ref: ref,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -185,40 +206,54 @@ class _SoldierPanel extends StatelessWidget {
     final base = deriveStats(so);
     final d = deriveStats(so, training: fac?.type);
     final trainStat = fac == null ? null : facilityDefs[fac.type]!.trains;
-    final maxLevel = so.level >= 20;
+    final maxLevel = so.level >= maxSoldierLevel;
     final need = xpForNext(so.level);
     final left = (need - so.xp).clamp(0, need);
+    // Nút + chỉ có khi còn điểm; luật (allocateStat) kiểm tra lại nên bấm quá số điểm vô hại.
+    Widget? plusFor(MainStat stat) => so.statPoints > 0
+        ? PlusStatButton(
+            key: ValueKey('plus-${stat.name}'),
+            onPressed: () => controller.allocateStat(so.id, stat),
+          )
+        : null;
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Tên ở giữa, bút sửa ở bên phải tên.
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  so.name,
-                  key: const ValueKey('soldier-name'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Pal.text,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
+          // Tên ở giữa kèm bút sửa; CẢ HÀNG là vùng bấm (cao tối thiểu 40px) để mở hộp thoại đổi tên.
+          Tooltip(
+            message: 'Đổi tên',
+            child: InkWell(
+              key: const ValueKey('soldier-rename-button'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _rename(context),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 40),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        so.name,
+                        key: const ValueKey('soldier-name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Pal.text,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(Icons.edit, size: 18, color: Pal.gold),
+                    ),
+                  ],
                 ),
               ),
-              InkWell(
-                key: const ValueKey('soldier-rename-button'),
-                onTap: () => _rename(context),
-                child: const Padding(
-                  padding: EdgeInsets.all(6),
-                  child: Icon(Icons.edit, size: 16, color: Pal.gold),
-                ),
-              ),
-            ],
+            ),
           ),
           // HP / Năng lượng / Tinh thần / Vàng / Lương thực.
           Row(
@@ -233,13 +268,13 @@ class _SoldierPanel extends StatelessWidget {
               ),
               _Stat3(
                 const StatIcon(EffectStat.energy),
-                'Năng lượng',
-                '${so.energy}/$maxEnergy',
+                'Thể lực',
+                '${so.energy}/${energyCap(so)}',
               ),
               _Stat3(
                 const StatIcon(EffectStat.morale),
                 'Tinh thần',
-                '${so.morale}/100',
+                '${so.morale}/${moraleCap(so)}',
               ),
               _Stat3(
                 Icon(resIcons[Res.coins]!, size: 16, color: Pal.gold),
@@ -264,49 +299,74 @@ class _SoldierPanel extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
+                      // Bốn chỉ số gốc (số nguyên): Sức mạnh, Tốc độ, Thể hình, Công. HP/Thể lực/Tinh thần là dẫn xuất.
                       _Row(
                         'Sức mạnh',
-                        '${d.stats[Stat.str]}',
+                        '${d.core.str}',
                         stat: EffectStat.strength,
-                        baseValue: '${base.stats[Stat.str]}',
+                        baseValue: '${base.core.str}',
+                        plus: plusFor(MainStat.strength),
                       ),
                       _Row(
                         'Tốc độ',
-                        d.speed.toStringAsFixed(1),
+                        '${d.core.dex}',
                         stat: EffectStat.speed,
-                        baseValue: base.speed.toStringAsFixed(1),
-                      ),
-                      _Row('Level', '${so.level}', valueKey: 'soldier-level'),
-                      _Exp(
-                        value: maxLevel ? 1 : so.xp / need,
-                        text: maxLevel ? 'Tối đa' : '${so.xp}/$need',
-                        remaining: maxLevel ? null : 'Còn $left EXP',
+                        baseValue: '${base.core.dex}',
+                        plus: plusFor(MainStat.speed),
                       ),
                       _Row(
-                        'Thể lực',
-                        '${d.stats[Stat.con]}',
+                        'Thể hình',
+                        '${d.core.con}',
                         stat: EffectStat.stamina,
-                        baseValue: '${base.stats[Stat.con]}',
+                        baseValue: '${base.core.con}',
+                        plus: plusFor(MainStat.build),
                       ),
                       _Row(
-                        'Tấn công',
-                        d.attack.toStringAsFixed(1),
+                        'Công',
+                        '${d.core.atk}',
                         stat: EffectStat.attack,
-                        baseValue: base.attack.toStringAsFixed(1),
+                        baseValue: '${base.core.atk}',
+                        plus: plusFor(MainStat.attack),
                       ),
                     ],
                   ),
                 ),
                 Expanded(
                   flex: 9,
-                  child: Center(
-                    child: LayoutBuilder(
-                      builder: (context, box) => SoldierSprite.of(
-                        so,
-                        bust: false,
-                        size: box.biggest.shortestSide.clamp(40.0, 130.0),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: LayoutBuilder(
+                            builder: (context, box) => LevelUpMark(
+                              show: so.statPoints > 0,
+                              size: 20,
+                              child: SoldierSprite.of(
+                                so,
+                                bust: false,
+                                size: box.biggest.shortestSide.clamp(
+                                  40.0,
+                                  130.0,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      // Cấp và EXP nằm ngay dưới chân nhân vật.
+                      _Row(
+                        so.statPoints > 0
+                            ? 'Level • ${so.statPoints} điểm'
+                            : 'Level',
+                        '${so.level}',
+                        valueKey: 'soldier-level',
+                      ),
+                      _Exp(
+                        value: maxLevel ? 1 : so.xp / need,
+                        text: maxLevel ? 'Tối đa' : '${so.xp}/$need',
+                        remaining: maxLevel ? null : 'Còn $left EXP',
+                      ),
+                    ],
                   ),
                 ),
                 Expanded(
@@ -318,18 +378,43 @@ class _SoldierPanel extends StatelessWidget {
                         0.0,
                         box.maxWidth - 14,
                       );
+                      final twoHanded =
+                          so.weaponId != null &&
+                          itemDefs[so.weaponId]?.twoHanded == true;
                       return Column(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _EquipCell(1, 'armor', so.armorId, 'Áo giáp', cell),
+                          _EquipCell(
+                            1,
+                            Slot.armor,
+                            'armor',
+                            so.armorId,
+                            'Áo giáp',
+                            cell,
+                            soldier: so,
+                            controller: controller,
+                          ),
                           _EquipCell(
                             2,
+                            Slot.weapon,
                             'weapon',
                             so.weaponId,
-                            'Trang bị',
+                            'Vũ khí',
                             cell,
+                            soldier: so,
+                            controller: controller,
                           ),
-                          _EquipCell(3, 'shield', so.shieldId, 'Khiên', cell),
+                          _EquipCell(
+                            3,
+                            Slot.shield,
+                            'shield',
+                            twoHanded ? null : so.shieldId,
+                            'Khiên',
+                            cell,
+                            soldier: so,
+                            controller: controller,
+                            locked: twoHanded,
+                          ),
                         ],
                       );
                     },
@@ -353,7 +438,7 @@ class _SoldierPanel extends StatelessWidget {
                     ),
                     _Stat3(
                       const StatIcon(EffectStat.speed),
-                      'Tốc độ',
+                      'Di chuyển',
                       '${d.speed.toStringAsFixed(1)} m/s',
                     ),
                     _Stat3(
@@ -367,21 +452,15 @@ class _SoldierPanel extends StatelessWidget {
                     ),
                     _Stat3(
                       const StatIcon(EffectStat.attack),
-                      'Tấn công',
-                      d.attack.toStringAsFixed(1),
+                      'Sát thương',
+                      d.damageRange,
                     ),
                   ],
                 ),
               ),
-              // Chưa có hệ thống Buff/Nerf cho binh sĩ: để trống, không tạo hiệu ứng giả.
-              const SizedBox(
-                key: ValueKey('soldier-effects-list'),
-                width: 28,
-                child: Text(
-                  '—',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Pal.muted, fontSize: 11),
-                ),
+              _GearEffects(
+                key: const ValueKey('soldier-effects-list'),
+                soldier: so,
               ),
             ],
           ),
@@ -391,6 +470,7 @@ class _SoldierPanel extends StatelessWidget {
               facility: facilityDefs[fac.type]!.name,
               stat: statNames[trainStat]!,
               percent: so.train[trainStat] ?? 0,
+              ratePerDay: trainingRates(fac.type, fac.level)[trainStat] ?? 0,
             ),
           const SizedBox(height: 4),
           Align(
@@ -423,10 +503,8 @@ class _SoldierPanel extends StatelessWidget {
     if (r.ok) Navigator.of(context).pop(); // đóng hồ sơ, về giao diện trước đó
   }
 
-  Future<void> _rename(BuildContext context) => showDialog<void>(
-    context: context,
-    builder: (_) => _RenameDialog(controller: controller, soldier: soldier),
-  );
+  Future<void> _rename(BuildContext context) =>
+      showRenameSoldierDialog(context, controller, soldier);
 }
 
 /// Xác nhận sa thải. Nút xác nhận chỉ bấm được một lần (chặn bấm lặp trong lúc dialog đang đóng).
@@ -471,59 +549,6 @@ class _DismissDialogState extends State<_DismissDialog> {
 }
 
 /// Hộp đổi tên: chỉ đóng khi lưu thành công (luật [GameRules.rename] kiểm tra tên rỗng / độ dài).
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.controller, required this.soldier});
-  final GameController controller;
-  final Soldier soldier;
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  late final TextEditingController _text = TextEditingController(
-    text: widget.soldier.name,
-  );
-  String? _error;
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Đổi tên'),
-    content: TextField(
-      key: const ValueKey('soldier-rename-field'),
-      controller: _text,
-      autofocus: true,
-      maxLength: 24,
-      decoration: InputDecoration(errorText: _error),
-    ),
-    actions: [
-      TextButton(
-        key: const ValueKey('soldier-rename-cancel'),
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Hủy'),
-      ),
-      TextButton(
-        key: const ValueKey('soldier-rename-ok'),
-        onPressed: () {
-          final r = widget.controller.rename(widget.soldier.id, _text.text);
-          if (r.ok) {
-            Navigator.pop(context);
-          } else {
-            setState(() => _error = r.message);
-          }
-        },
-        child: const Text('Lưu'),
-      ),
-    ],
-  );
-}
-
 /// Icon phía trên, nhãn nhỏ, giá trị phía dưới; co lại nếu hẹp để không tràn/xuống dòng. [big]: HP nổi bật.
 class _Stat3 extends StatelessWidget {
   const _Stat3(
@@ -572,7 +597,9 @@ class _Row extends StatelessWidget {
     this.valueKey,
     this.stat,
     this.baseValue,
+    this.plus,
   });
+  final Widget? plus;
   final String? valueKey;
   final String label;
   final String value;
@@ -606,27 +633,33 @@ class _Row extends StatelessWidget {
                 child: text,
               )
             : text,
+        if (plus != null) ...[const SizedBox(width: 4), plus!],
       ],
     );
   }
 }
 
-/// Tiến trình tập luyện: số ngày đã tích lũy trên số ngày cần cho +1 điểm (theo [trainPercentPerDay]).
+/// Tiến trình tập luyện: số ngày đã tích lũy trên số ngày cần cho +1 điểm (theo [trainingRates]).
 class _TrainingLine extends StatelessWidget {
   const _TrainingLine({
     super.key,
     required this.facility,
     required this.stat,
     required this.percent,
+    required this.ratePerDay,
   });
   final String facility;
   final String stat;
   final int percent;
 
+  /// Tiến độ mỗi ngày (phần trăm) của chỉ số này tại công trình ở cấp hiện tại.
+  final int ratePerDay;
+
   @override
   Widget build(BuildContext context) {
-    final need = (100 / trainPercentPerDay).ceil();
-    final days = (percent / trainPercentPerDay).floor().clamp(0, need - 1);
+    final rate = ratePerDay <= 0 ? 25 : ratePerDay;
+    final need = (100 / rate).ceil();
+    final days = (percent / rate).floor().clamp(0, need - 1);
     return Padding(
       padding: const EdgeInsets.only(top: 3),
       child: Row(
@@ -682,47 +715,235 @@ class _Exp extends StatelessWidget {
 class _EquipCell extends StatelessWidget {
   const _EquipCell(
     this.number,
+    this.slot,
     this.keyName,
     this.itemId,
     this.tooltip,
-    this.cell,
-  );
+    this.cell, {
+    required this.soldier,
+    required this.controller,
+    this.locked = false,
+  });
   final double cell;
   final int number;
+  final Slot slot;
   final String keyName;
   final String? itemId;
   final String tooltip;
+  final Soldier soldier;
+  final GameController controller;
+
+  /// Ô bị chiếm (khiên khi đang cầm vũ khí hai tay).
+  final bool locked;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Text('$number', style: _label),
-      const SizedBox(width: 3),
-      SizedBox(
-        width: cell,
-        height: cell,
-        child: Tooltip(
-          message: itemId == null
-              ? '$tooltip: trống'
-              : '$tooltip: ${itemDefs[itemId]?.name ?? itemId}',
-          child: DecoratedBox(
-            key: ValueKey('soldier-equip-$keyName'),
-            decoration: BoxDecoration(
-              border: Border.all(color: Pal.lineStrong, width: 1.5),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(2),
-              child: LayoutBuilder(
-                builder: (context, box) =>
-                    ItemGlyph(itemId, size: box.biggest.shortestSide),
-              ),
-            ),
+  Widget build(BuildContext context) {
+    final ref = itemId;
+    final box = DecoratedBox(
+      key: ValueKey('soldier-equip-$keyName'),
+      decoration: BoxDecoration(
+        border: Border.all(color: Pal.lineStrong, width: 1.5),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: LayoutBuilder(
+          builder: (context, box) => Stack(
+            fit: StackFit.expand,
+            children: [
+              ItemGlyph(ref, size: box.biggest.shortestSide),
+              if (locked)
+                const Center(
+                  child: Icon(Icons.lock, size: 16, color: Pal.muted),
+                ),
+            ],
           ),
         ),
       ),
+    );
+    // Ô nhận item kéo từ rương (đúng loại, ô không khóa); item trong ô kéo được về rương để tháo.
+    final interactive = ref == null
+        ? GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: locked ? null : () => showEmptySlotInfo(context, slot),
+            child: box,
+          )
+        : DragItem<GearDrag>(
+            data: GearDrag(ref, fromSlot: slot, soldierId: soldier.id),
+            feedbackSize: Size(cell, cell),
+            axis: null,
+            onTap: () => showGearDetail(
+              context,
+              controller,
+              soldier,
+              ref: ref,
+              slot: slot,
+            ),
+            child: box,
+          );
+    return Row(
+      children: [
+        Text('$number', style: _label),
+        const SizedBox(width: 3),
+        SizedBox(
+          width: cell,
+          height: cell,
+          child: Tooltip(
+            message: locked
+                ? '$tooltip: đang cầm vũ khí hai tay'
+                : ref == null
+                ? '$tooltip: trống'
+                : '$tooltip: ${itemDisplayName(ref)}',
+            child: ItemDropZone<GearDrag>(
+              key: ValueKey('drop-equip-$keyName'),
+              radius: 5,
+              accepts: (d) =>
+                  !locked &&
+                  d.fromChest &&
+                  slotDropProblem(d.ref, slot) == null,
+              onDrop: (d) => toast(
+                context,
+                controller.equip(soldier.id, d.ref, slot: slot),
+              ),
+              child: interactive,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Popup ô trống: nhắc cách dùng, không đổi state.
+Future<void> showEmptySlotInfo(
+  BuildContext context,
+  Slot slot,
+) => showItemDetail(
+  context,
+  info: Text(
+    'Ô ${slotNames[slot]} đang trống.\nKéo một ${slotNames[slot]!.toLowerCase()} từ Hòm đồ vào ô này để trang bị.',
+    key: const ValueKey('empty-slot-info'),
+  ),
+);
+
+/// Popup chi tiết của một món trang bị (trong rương hoặc đang đeo [slot]). Hành động phụ: Trang bị / Tháo — luồng
+/// chính vẫn là kéo-thả. Mở popup không đổi state.
+Future<void> showGearDetail(
+  BuildContext context,
+  GameController controller,
+  Soldier soldier, {
+  required String ref,
+  Slot? slot,
+}) {
+  final def = itemDefs[ref]!;
+  final worn = slot != null;
+  String? reason;
+  if (worn) {
+    reason = GameRules.overloadReason(
+      controller.state!,
+      GameRules.itemWeightTenths(ref),
+    );
+  } else {
+    reason = equipProblem(soldier, def);
+  }
+  return showItemDetail(
+    context,
+    info: ItemInfoBlock.equipment(
+      ref,
+      forSoldier: worn ? null : soldier,
+      owned: worn ? null : controller.state!.inventory[ref] ?? 0,
+    ),
+    actions: [
+      if (worn)
+        ItemAction(
+          'Tháo',
+          () => toast(context, controller.unequip(soldier.id, slot)),
+          reason: reason,
+          key: const ValueKey('item-detail-unequip'),
+        )
+      else
+        ItemAction(
+          'Trang bị',
+          () => toast(context, controller.equip(soldier.id, ref)),
+          reason: reason,
+          key: const ValueKey('item-detail-equip'),
+        ),
     ],
   );
+}
+
+/// Tóm tắt buff/debuff đang có từ trang bị (dữ liệu thật từ loadout). Chạm để xem danh sách trong popup.
+class _GearEffects extends StatelessWidget {
+  const _GearEffects({super.key, required this.soldier});
+  final Soldier soldier;
+
+  @override
+  Widget build(BuildContext context) {
+    final effects = EquipmentLoadout.of(soldier).effects;
+    final buffs = effects.where((e) => e.isBuff).length;
+    final debuffs = effects.where((e) => e.isDebuff).length;
+    return Tooltip(
+      message: effects.isEmpty
+          ? 'Trang bị chưa có buff/debuff'
+          : effects.map((e) => e.describe()).join('\n'),
+      child: InkWell(
+        onTap: () =>
+            showItemDetail(context, info: _GearEffectsList(soldier: soldier)),
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 44,
+          height: 42,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '+$buffs',
+                key: const ValueKey('soldier-buff-count'),
+                style: TextStyle(
+                  color: buffs > 0 ? Pal.moss : Pal.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                '−$debuffs',
+                key: const ValueKey('soldier-debuff-count'),
+                style: TextStyle(
+                  color: debuffs > 0 ? Pal.blood : Pal.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Danh sách buff/debuff đang có từ trang bị (nội dung popup của [_GearEffects]).
+class _GearEffectsList extends StatelessWidget {
+  const _GearEffectsList({required this.soldier});
+  final Soldier soldier;
+
+  @override
+  Widget build(BuildContext context) {
+    final effects = EquipmentLoadout.of(soldier).effects;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Buff / Debuff từ trang bị',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+        ),
+        const SizedBox(height: 6),
+        if (effects.isEmpty) const Text('Trang bị chưa có buff/debuff.'),
+        for (final e in effects) EffectLine(e),
+      ],
+    );
+  }
 }
 
 // --------------------------------------------------------------- Phải
@@ -734,32 +955,39 @@ class _InventoryPanel extends StatelessWidget {
     required this.page,
     required this.onFilter,
     required this.onPage,
+    required this.onOpen,
   });
 
+  /// Mở màn trang bị với vật phẩm [ref] được chọn sẵn.
+  final ValueChanged<String> onOpen;
   final GameState state;
   final InventoryFilter filter;
   final int page;
   final ValueChanged<InventoryFilter> onFilter;
   final ValueChanged<int> onPage;
 
-  /// Các ngăn chứa (mỗi loại vật phẩm một ngăn, kèm số lượng) theo bộ lọc. Không sửa inventory.
-  static List<MapEntry<ItemDef, int>> entries(GameState s, InventoryFilter f) {
-    final list = <MapEntry<ItemDef, int>>[];
+  /// Các ngăn chứa theo bộ lọc: mỗi bản sao có biến thể một ngăn riêng (khóa là mã tham chiếu), bản tiêu
+  /// chuẩn cùng thiết kế xếp chồng kèm số lượng. Không sửa inventory.
+  static List<MapEntry<String, int>> entries(GameState s, InventoryFilter f) {
+    final list = <MapEntry<String, int>>[];
     for (final e in s.inventory.entries) {
       final def = itemDefs[e.key];
       if (def == null || e.value <= 0) continue;
-      if (inventoryFilterAccepts(f, def)) list.add(MapEntry(def, e.value));
+      if (inventoryFilterAccepts(f, def)) list.add(e);
     }
     list.sort((a, b) {
-      final t = b.key.tier.compareTo(a.key.tier);
-      return t != 0 ? t : a.key.name.compareTo(b.key.name);
+      final da = itemDefs[a.key]!, db = itemDefs[b.key]!;
+      final t = db.tier.compareTo(da.tier);
+      return t != 0
+          ? t
+          : itemDisplayName(a.key).compareTo(itemDisplayName(b.key));
     });
     return list;
   }
 
   @override
   Widget build(BuildContext context) {
-    final used = GameRules.inventoryCount(state);
+    final used = GameRules.inventoryWeightKg(state);
     final cap = GameRules.inventoryCapacity(state);
     final shownUsed = used < 0 ? 0 : used;
     final all = entries(state, filter);
@@ -786,9 +1014,9 @@ class _InventoryPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          // Kho đồ hiện chỉ có sức chứa theo SỐ MÓN (chưa có hệ thống cân nặng) nên hiển thị theo món.
+          // Trọng lượng rương (kg, làm tròn lên khi hiển thị) / sức chứa; nguồn: GameRules.inventoryWeightKg.
           Text(
-            '$shownUsed / $cap món',
+            '$shownUsed / $cap kg',
             key: const ValueKey('inv-capacity'),
             textAlign: TextAlign.center,
             style: _value,
@@ -834,6 +1062,7 @@ class _InventoryPanel extends StatelessWidget {
                 _ItemCell(
                   key: ValueKey('inv-slot-$i'),
                   entry: i < slice.length ? slice[i] : null,
+                  onOpen: onOpen,
                 ),
             ],
           ),
@@ -915,8 +1144,9 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _ItemCell extends StatelessWidget {
-  const _ItemCell({super.key, required this.entry});
-  final MapEntry<ItemDef, int>? entry;
+  const _ItemCell({super.key, required this.entry, required this.onOpen});
+  final MapEntry<String, int>? entry;
+  final ValueChanged<String> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -936,7 +1166,7 @@ class _ItemCell extends StatelessWidget {
                     padding: const EdgeInsets.all(2),
                     child: LayoutBuilder(
                       builder: (context, c) =>
-                          ItemGlyph(e.key.id, size: c.biggest.shortestSide),
+                          ItemGlyph(e.key, size: c.biggest.shortestSide),
                     ),
                   ),
                 ),
@@ -950,6 +1180,7 @@ class _ItemCell extends StatelessWidget {
                         color: Pal.text,
                         fontSize: 9,
                         fontWeight: FontWeight.w900,
+                        shadows: [Shadow(color: Colors.black, blurRadius: 2)],
                       ),
                     ),
                   ),
@@ -957,29 +1188,14 @@ class _ItemCell extends StatelessWidget {
             ),
     );
     if (e == null) return box;
-    return InkWell(onTap: () => _info(context, e.key, e.value), child: box);
-  }
-
-  void _info(BuildContext context, ItemDef it, int qty) {
-    final lines = <String>[
-      'Số lượng: $qty',
-      if (it.damage > 0) 'Sát thương: ${it.damage}',
-      if (it.defense > 0) 'Phòng thủ: ${it.defense}',
-      if (it.speed != 0) 'Tốc độ: ${it.speed}',
-      for (final b in it.bonus.entries)
-        '${statNames[b.key]}: ${b.value >= 0 ? '+' : ''}${b.value}',
-    ];
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(it.name),
-        content: Text(lines.join('\n')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng'),
-          ),
-        ],
+    return Tooltip(
+      message: itemDisplayName(e.key),
+      child: DragItem<GearDrag>(
+        data: GearDrag(e.key),
+        axis: null,
+        feedbackSize: const Size(56, 56),
+        onTap: () => onOpen(e.key),
+        child: box,
       ),
     );
   }

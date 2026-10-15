@@ -17,7 +17,7 @@ enum MoveStatus {
   /// Đã tới đích.
   arrived,
 
-  /// Bước kế tiếp là vùng không đi được (sông, vách đá, mép bản đồ).
+  /// Bước kế tiếp ra ngoài ranh giới bản đồ (nước và vách đá KHÔNG còn chặn: chỉ tốn thêm thể lực).
   blocked,
 
   /// Thể lực về 0 giữa đường.
@@ -114,7 +114,7 @@ class MovementRules {
       final step = math.min(stepLength, budget);
       final next = WPoint(pos.x + dir.x * step, pos.y + dir.y * step);
       final nextTerrain = world.terrainAt(next);
-      if (!TerrainRules.passable(nextTerrain)) {
+      if (!TerrainRules.traversable(nextTerrain)) {
         return MoveOutcome(
           position: pos,
           stamina: left,
@@ -192,13 +192,7 @@ class MovementRules {
   static String? destinationProblem(WorldMap world, WPoint dest) {
     if (!world.inBounds(dest)) return 'Ngoài ranh giới bản đồ.';
     final t = world.terrainAt(dest);
-    if (!TerrainRules.passable(t)) {
-      return switch (t) {
-        TerrainType.water => 'Không thể băng qua mặt nước, hãy tìm cầu.',
-        TerrainType.cliff => 'Vách đá không thể vượt qua.',
-        _ => 'Không thể đi tới đó.',
-      };
-    }
+    if (!TerrainRules.traversable(t)) return 'Không thể đi tới đó.';
     return null;
   }
 }

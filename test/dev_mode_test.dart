@@ -131,7 +131,7 @@ void main() {
         DevMode.enabled = true;
         final s = broke();
         // Bán không có hàng: bị từ chối, vẫn không âm.
-        final r = GameRules.sellResourceLots(s, 'x', Res.wood, 1);
+        final r = GameRules.sellResource(s, 'x', Res.wood, 1);
         expect(r.ok, isFalse);
         expect(s.res.values.every((v) => v >= 0), isTrue);
       },

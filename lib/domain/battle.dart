@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'combat_condition.dart';
 import 'models.dart';
 import 'stats.dart';
 
@@ -55,7 +56,21 @@ class BattleUnit {
   int kills = 0;
   int? targetId;
 
-  bool get alive => hp > 0;
+  // ---- Số liệu đo trong trận (chỉ đọc sau trận) ----
+  /// Sát thương HỢP LỆ đã gây, theo mục tiêu (đã chặn quá mức máu còn lại: không tính sát thương thừa).
+  final Map<int, int> dealt = {};
+  int swings = 0;
+  int hitsTaken = 0;
+  int damageTaken = 0;
+
+  /// Giây còn đứng trong trận (tới khi gục, bỏ chạy hoặc hết trận).
+  double activeSeconds = 0;
+
+  /// Tinh thần còn lại (chỉ quân ta tụt trong trận; địch không bỏ chạy). Về 0: đơn vị bỏ chạy/đào ngũ.
+  late double moraleLive = morale.toDouble();
+  bool fled = false;
+
+  bool get alive => hp > 0 && !fled;
 }
 
 BattleUnit unitFrom(Soldier s, {required bool player, required Pos at}) {
@@ -111,10 +126,34 @@ class BattleEvent {
 }
 
 class UnitOutcome {
-  const UnitOutcome(this.finalHp, this.maxHp, this.dead, this.kills);
+  const UnitOutcome(
+    this.finalHp,
+    this.maxHp,
+    this.dead,
+    this.kills, {
+    this.dealt = const {},
+    this.swings = 0,
+    this.hitsTaken = 0,
+    this.damageTaken = 0,
+    this.activeSeconds = 0,
+    this.finalMorale,
+    this.fled = false,
+  });
   final int finalHp, maxHp;
   final bool dead;
   final int kills;
+
+  /// Sát thương hợp lệ đã gây, theo mục tiêu.
+  final Map<int, int> dealt;
+  final int swings, hitsTaken, damageTaken;
+
+  /// Số giây đứng trong trận (thời gian chiến đấu thực của đơn vị).
+  final double activeSeconds;
+
+  /// Tinh thần sau trận (đã trừ theo sát thương nhận). 0 + [fled] = bỏ chạy giữa trận.
+  final int? finalMorale;
+  final bool fled;
+  int get totalDealt => dealt.values.fold(0, (a, b) => a + b);
 }
 
 enum Winner { player, enemy, draw }
@@ -158,7 +197,6 @@ BattleReport simulateBattle(
 ) {
   final rng = Random(seed);
   final all = [...players, ...enemies]..sort((a, b) => a.id.compareTo(b.id));
-  final byId = {for (final u in all) u.id: u};
   final frames = <BattleFrame>[];
   final events = <BattleEvent>[];
   var t = 0.0;
@@ -166,7 +204,7 @@ BattleReport simulateBattle(
 
   BattleFrame snap(Map<int, int?> attacking) => BattleFrame(t, {
     for (final u in all)
-      u.id: UnitFrame(u.x, u.y, max(0, u.hp), attacking[u.id]),
+      u.id: UnitFrame(u.x, u.y, u.fled ? 0 : max(0, u.hp), attacking[u.id]),
   });
 
   bool side(bool player) => all.any((u) => u.player == player && u.alive);
@@ -176,6 +214,7 @@ BattleReport simulateBattle(
     final attacking = <int, int?>{};
     for (final u in all) {
       if (!u.alive) continue;
+      u.activeSeconds += stepSeconds;
       u.cooldown -= stepSeconds;
       // Chọn mục tiêu gần nhất còn sống (tính lại mỗi nhịp để đơn giản và xác định).
       BattleUnit? best;
@@ -193,28 +232,55 @@ BattleReport simulateBattle(
       final dist = sqrt(bestD);
       if (dist <= u.d.range) {
         if (u.cooldown <= 0) {
-          final hit = rng.nextDouble() < u.d.accuracy;
+          final accuracy = u.d.accuracy;
+          final critChance = u.d.crit;
+          final targetDefense = best.d.defense;
+          final hit = rng.nextDouble() < accuracy;
           var dmg = 0;
           var crit = false;
           var killed = false;
           if (hit) {
-            crit = rng.nextDouble() < u.d.crit;
+            crit = rng.nextDouble() < critChance;
+            // Quân ta dùng tinh thần đang giảm trong trận; địch giữ tinh thần ban đầu (xem BattleUnit.moraleLive).
+            final moraleMult = u.player
+                ? 0.85 + 0.3 * (u.moraleLive / u.d.maxMorale).clamp(0.0, 1.0)
+                : u.d.moraleMult;
+            // Sát thương vũ khí là KHOẢNG nguyên: mỗi đòn trúng rút đều một số trong [weaponMin, weaponMax].
+            final roll =
+                u.d.weaponMin + rng.nextInt(u.d.weaponMax - u.d.weaponMin + 1);
             var raw =
-                u.d.attack *
-                (0.85 + rng.nextDouble() * 0.3) *
-                u.d.moraleMult *
+                (roll + u.d.attackFlat) *
+                u.d.attackMult *
+                moraleMult *
                 damageScale;
             if (crit) raw *= 1.5;
             dmg = max(
               1,
-              (raw * (1 - best.d.reductionVs(u.d.armorPen))).round(),
+              (raw * (1 - Derived.reductionFor(targetDefense, u.d.armorPen)))
+                  .round(),
             );
+            // Sát thương hợp lệ không vượt máu còn lại của mục tiêu.
+            final valid = min(dmg, best.hp);
             best.hp -= dmg;
-            if (!best.alive) {
+            u.dealt[best.id] = (u.dealt[best.id] ?? 0) + valid;
+            best.hitsTaken++;
+            best.damageTaken += valid;
+            if (best.player) {
+              best.moraleLive -=
+                  moraleLossForHit(valid, best.d.maxHp) *
+                  best.d.maxMorale /
+                  100;
+              if (best.hp > 0 && best.moraleLive <= 0) {
+                best.moraleLive = 0;
+                best.fled = true; // bỏ chạy: không còn đánh, không còn bị nhắm
+              }
+            }
+            if (best.hp <= 0) {
               u.kills++;
               killed = true;
             }
           }
+          u.swings++;
           events.add(
             BattleEvent(
               t: t,
@@ -287,7 +353,19 @@ BattleReport simulateBattle(
     enemyUnits: [for (final u in enemies) sn(u)],
     outcomes: {
       for (final u in all)
-        u.id: UnitOutcome(max(0, byId[u.id]!.hp), u.d.maxHp, !u.alive, u.kills),
+        u.id: UnitOutcome(
+          max(0, u.hp),
+          u.d.maxHp,
+          u.hp <= 0,
+          u.kills,
+          dealt: Map.unmodifiable(u.dealt),
+          swings: u.swings,
+          hitsTaken: u.hitsTaken,
+          damageTaken: u.damageTaken,
+          activeSeconds: u.activeSeconds,
+          finalMorale: u.player ? u.moraleLive.round() : u.morale,
+          fled: u.fled,
+        ),
     },
   );
 }

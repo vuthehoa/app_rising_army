@@ -10,6 +10,7 @@ import '../../domain/catalog.dart';
 import '../../domain/models.dart';
 import '../../domain/rules.dart';
 import '../widgets/common.dart';
+import '../widgets/mission_kit.dart';
 import '../widgets/game_hud.dart';
 import 'tavern_screen.dart';
 import 'vendor_screen.dart';
@@ -196,6 +197,7 @@ class _CityBuildings extends StatelessWidget {
                 child: _CityLocationTap(
                   label:
                       'Tiệm rèn: ${_vendorDescription(CityLocationKind.smithy)}',
+                  name: 'Tiệm rèn',
                   enabled: _vendorEnabled(CityLocationKind.smithy),
                   onTap: () => _openVendor(context, CityLocationKind.smithy),
                   child: SmithySceneArt(),
@@ -228,6 +230,7 @@ class _CityBuildings extends StatelessWidget {
                 child: _CityLocationTap(
                   label:
                       'Quán rượu: ${_vendorDescription(CityLocationKind.tavern)}',
+                  name: 'Quán rượu',
                   enabled: _vendorEnabled(CityLocationKind.tavern),
                   onTap: () => _openVendor(context, CityLocationKind.tavern),
                   child: TavernSceneArt(),
@@ -259,6 +262,7 @@ class _CityBuildings extends StatelessWidget {
                 height: h * 0.30,
                 child: _CityLocationTap(
                   label: 'Chợ: ${_vendorDescription(CityLocationKind.market)}',
+                  name: 'Chợ',
                   enabled: _vendorEnabled(CityLocationKind.market),
                   onTap: () => _openVendor(context, CityLocationKind.market),
                   child: MarketPlaceholderArt(),
@@ -349,12 +353,16 @@ class _CityBuildings extends StatelessWidget {
 class _CityLocationTap extends StatelessWidget {
   const _CityLocationTap({
     required this.label,
+    required this.name,
     required this.enabled,
     required this.onTap,
     required this.child,
   });
 
   final String label;
+
+  /// Tên ngắn hiện trên biển gỗ dưới công trình (chỉ để nhận diện; ngữ nghĩa vẫn lấy từ [label]).
+  final String name;
 
   /// Chỉ ảnh hưởng ngữ nghĩa/con trỏ; khi không khả dụng, chạm vẫn gọi [onTap] để báo lý do và KHÔNG điều hướng.
   final bool enabled;
@@ -372,8 +380,89 @@ class _CityLocationTap extends StatelessWidget {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
-          child: child,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // Không khả dụng: công trình mờ đi (chạm vẫn báo lý do như cũ).
+              Positioned.fill(
+                child: enabled
+                    ? child
+                    : ColorFiltered(
+                        colorFilter: const ColorFilter.matrix(<double>[
+                          0.45, 0.4, 0.15, 0, 0, //
+                          0.45, 0.4, 0.15, 0, 0, //
+                          0.45, 0.4, 0.15, 0, 0, //
+                          0, 0, 0, 1, 0,
+                        ]),
+                        child: child,
+                      ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: -4,
+                child: ExcludeSemantics(
+                  child: Center(
+                    child: _SignPlate(name: name, enabled: enabled),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// Biển gỗ nhỏ ghi tên địa điểm; có ổ khóa khi chưa dùng được.
+class _SignPlate extends StatelessWidget {
+  const _SignPlate({required this.name, required this.enabled});
+
+  final String name;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey('city-sign-$name'),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: enabled ? const Color(0xF2EBD9AE) : const Color(0xE6BDB59E),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: const Color(0xFF755333), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x55000000),
+            offset: Offset(1, 2),
+            blurRadius: 3,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!enabled) ...[
+            const Icon(Icons.lock, size: 11, color: Color(0xFF49311E)),
+            const SizedBox(width: 3),
+          ],
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                name,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontFamily: serif,
+                  color: Color(0xFF49311E),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1065,30 +1154,41 @@ class _CityGroundPainter extends CustomPainter {
 // QUEST PANEL
 // ================================================================
 
-class _QuestPanel extends StatelessWidget {
+class _QuestPanel extends StatefulWidget {
   const _QuestPanel({required this.cityId, required this.compact});
 
   final String cityId;
   final bool compact;
 
   @override
+  State<_QuestPanel> createState() => _QuestPanelState();
+}
+
+class _QuestPanelState extends State<_QuestPanel> {
+  @override
   Widget build(BuildContext context) {
-    // Nhiệm vụ khả dụng thật từ bảng nhiệm vụ của game; chạm một thẻ để nhận (chỉ nhận được ở đây).
+    // Nhiệm vụ khả dụng thật từ bảng nhiệm vụ của game.
     final controller = ControllerScope.of(context);
     final state = controller.state!;
+    final offered = GameRules.byStatus(state, MissionStatus.offered);
     List<_QuestData> board(MissionColor color) => [
-      for (final m in GameRules.byStatus(state, MissionStatus.offered))
+      for (final m in offered)
         if (templateById(m.templateId).color == color)
           _QuestData(
+            id: m.id,
             title: templateById(m.templateId).title,
             description: templateById(m.templateId).desc,
-            difficulty: (templateById(m.templateId).tierMin + 1).clamp(1, 5),
+            difficulty: templateById(m.templateId).difficulty,
             isGolden: color == MissionColor.gold,
-            onTap: () => toast(context, controller.acceptMission(m.id)),
+            selected: false,
+            // Chạm thẻ CHỈ mở popup chi tiết; nhiệm vụ chỉ được nhận khi bấm "Nhận nhiệm vụ" trong popup.
+            onTap: () => showMissionDetail(context, controller, m.id),
+            onInfo: () => showMissionDetail(context, controller, m.id),
           ),
     ];
     final goldenQuests = board(MissionColor.gold);
     final redQuests = board(MissionColor.red);
+    final compact = widget.compact;
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1119,18 +1219,19 @@ class _QuestPanel extends StatelessWidget {
                   _QuestGrid(quests: goldenQuests, compact: compact),
                   const SizedBox(height: 12),
                   _QuestGrid(quests: redQuests, compact: compact),
-                  const SizedBox(height: 12),
-                  _CityNavigationPanel(
-                    onReturnToCamp: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
-                    onLeaveCity: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
-                  ),
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 6),
+          // Hai nút điều hướng luôn nằm cố định dưới cùng, không bị cuộn mất.
+          _CityNavigationPanel(
+            onReturnToCamp: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            onLeaveCity: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
           ),
         ],
       ),
@@ -1192,252 +1293,305 @@ class _QuestScrollCard extends StatelessWidget {
 
     final difficulty = quest.difficulty.clamp(1, 5);
 
-    return Material(
+    final card = Material(
       color: Colors.transparent,
       child: InkWell(
+        key: ValueKey('city-quest-${quest.id}'),
         borderRadius: BorderRadius.circular(8),
         onTap: quest.onTap,
-        child: SizedBox(
-          height: compact ? 124 : 134,
-          child: Column(
-            children: [
-              // Cuộn giấy cổ với dải ruy băng nằm chính giữa.
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 3,
-                    vertical: 3,
-                  ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Mặt giấy.
-                      Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                paper,
-                                Color.lerp(paper, ink, 0.08)!,
-                                paper,
+        onLongPress: quest.onInfo,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: quest.selected ? Pal.gold : Colors.transparent,
+              width: 2,
+            ),
+            color: quest.selected
+                ? Pal.gold.withValues(alpha: 0.14)
+                : Colors.transparent,
+          ),
+          child: SizedBox(
+            height: compact ? 124 : 134,
+            child: Column(
+              children: [
+                // Cuộn giấy cổ với dải ruy băng nằm chính giữa.
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 3,
+                      vertical: 3,
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Mặt giấy.
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  paper,
+                                  Color.lerp(paper, ink, 0.08)!,
+                                  paper,
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: quest.isGolden
+                                    ? const Color(0xFFB58A3B)
+                                    : const Color(0xFFAA5A4A),
+                                width: 1.2,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x30000000),
+                                  offset: Offset(1, 2),
+                                  blurRadius: 3,
+                                ),
                               ],
                             ),
-                            borderRadius: BorderRadius.circular(5),
-                            border: Border.all(
-                              color: quest.isGolden
-                                  ? const Color(0xFFB58A3B)
-                                  : const Color(0xFFAA5A4A),
-                              width: 1.2,
-                            ),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x30000000),
-                                offset: Offset(1, 2),
-                                blurRadius: 3,
+                          ),
+                        ),
+
+                        // Vân giấy cổ trang trí.
+                        Positioned.fill(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: CustomPaint(
+                              painter: _ParchmentPatternPainter(
+                                color: ink.withValues(alpha: 0.12),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // Vân giấy cổ trang trí.
-                      Positioned.fill(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: CustomPaint(
-                            painter: _ParchmentPatternPainter(
-                              color: ink.withValues(alpha: 0.12),
                             ),
                           ),
                         ),
-                      ),
 
-                      // Hai thanh cuộn giấy ở hai đầu.
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _ScrollRoll(
-                          color: paper,
-                          borderColor: ink,
-                          width: compact ? 9 : 11,
+                        // Hai thanh cuộn giấy ở hai đầu.
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: _ScrollRoll(
+                            color: paper,
+                            borderColor: ink,
+                            width: compact ? 9 : 11,
+                          ),
                         ),
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _ScrollRoll(
-                          color: paper,
-                          borderColor: ink,
-                          width: compact ? 9 : 11,
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: _ScrollRoll(
+                            color: paper,
+                            borderColor: ink,
+                            width: compact ? 9 : 11,
+                          ),
                         ),
-                      ),
 
-                      // Ruy băng màu vắt ngang chính giữa cuộn giấy.
-                      Positioned(
-                        left: compact ? 5 : 6,
-                        right: compact ? 5 : 6,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: SizedBox(
-                            height: compact ? 27 : 31,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              alignment: Alignment.center,
-                              children: [
-                                // Đuôi ruy băng.
-                                Positioned(
-                                  left: 2,
-                                  right: 2,
-                                  top: 3,
-                                  bottom: -4,
-                                  child: CustomPaint(
-                                    painter: _RibbonTailPainter(
-                                      color: Color.lerp(
-                                        ribbon,
-                                        Colors.black,
-                                        0.18,
-                                      )!,
-                                    ),
-                                  ),
-                                ),
-
-                                // Dải ruy băng chính.
-                                Container(
-                                  width: double.infinity,
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Color.lerp(ribbon, Colors.white, 0.13)!,
-                                        ribbon,
-                                        Color.lerp(ribbon, Colors.black, 0.12)!,
-                                      ],
-                                    ),
-                                    border: Border.symmetric(
-                                      horizontal: BorderSide(
+                        // Ruy băng màu vắt ngang chính giữa cuộn giấy.
+                        Positioned(
+                          left: compact ? 5 : 6,
+                          right: compact ? 5 : 6,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: SizedBox(
+                              height: compact ? 27 : 31,
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                alignment: Alignment.center,
+                                children: [
+                                  // Đuôi ruy băng.
+                                  Positioned(
+                                    left: 2,
+                                    right: 2,
+                                    top: 3,
+                                    bottom: -4,
+                                    child: CustomPaint(
+                                      painter: _RibbonTailPainter(
                                         color: Color.lerp(
                                           ribbon,
                                           Colors.black,
-                                          0.22,
+                                          0.18,
                                         )!,
-                                        width: 1,
                                       ),
                                     ),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        color: Color(0x30000000),
-                                        offset: Offset(0, 2),
-                                        blurRadius: 2,
-                                      ),
-                                    ],
                                   ),
-                                  child: Center(
-                                    child: Container(
-                                      width: 9,
-                                      height: 9,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Color.lerp(
+
+                                  // Dải ruy băng chính.
+                                  Container(
+                                    width: double.infinity,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Color.lerp(
+                                            ribbon,
+                                            Colors.white,
+                                            0.13,
+                                          )!,
                                           ribbon,
-                                          const Color(0xFFFFE8A5),
-                                          0.55,
-                                        ),
-                                        border: Border.all(
-                                          color: const Color(0xFFFFE8A5),
-                                          width: 1,
-                                        ),
-                                        boxShadow: const [
-                                          BoxShadow(
-                                            color: Color(0x44000000),
-                                            blurRadius: 2,
-                                          ),
+                                          Color.lerp(
+                                            ribbon,
+                                            Colors.black,
+                                            0.12,
+                                          )!,
                                         ],
                                       ),
+                                      border: Border.symmetric(
+                                        horizontal: BorderSide(
+                                          color: Color.lerp(
+                                            ribbon,
+                                            Colors.black,
+                                            0.22,
+                                          )!,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x30000000),
+                                          offset: Offset(0, 2),
+                                          blurRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Container(
+                                        width: 9,
+                                        height: 9,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Color.lerp(
+                                            ribbon,
+                                            const Color(0xFFFFE8A5),
+                                            0.55,
+                                          ),
+                                          border: Border.all(
+                                            color: const Color(0xFFFFE8A5),
+                                            width: 1,
+                                          ),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Color(0x44000000),
+                                              blurRadius: 2,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Tên nhiệm vụ (chạm thẻ để nhận).
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    quest.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: compact ? 10 : 11,
+                      fontWeight: FontWeight.w800,
+                      color: Pal.text,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+
+                // Đầu lâu nằm riêng bên dưới cuộn giấy.
+                Padding(
+                  padding: const EdgeInsets.only(top: 1, bottom: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < difficulty; i++)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1),
+                          child: Text(
+                            '☠',
+                            style: TextStyle(
+                              fontFamily: 'serif',
+                              fontSize: compact ? 12 : 14,
+                              height: 1,
+                              color: i < difficulty
+                                  ? const Color(0xFFC83B32)
+                                  : const Color(0xFFB7A99A),
+                              shadows: const [
+                                Shadow(
+                                  color: Color(0x30000000),
+                                  offset: Offset(0, 1),
+                                  blurRadius: 1,
                                 ),
                               ],
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
-              ),
-
-              // Tên nhiệm vụ (chạm thẻ để nhận).
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  quest.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: compact ? 10 : 11,
-                    fontWeight: FontWeight.w800,
-                    color: Pal.text,
-                    height: 1.1,
-                  ),
-                ),
-              ),
-
-              // Đầu lâu nằm riêng bên dưới cuộn giấy.
-              Padding(
-                padding: const EdgeInsets.only(top: 1, bottom: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < difficulty; i++)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 1),
-                        child: Text(
-                          '☠',
-                          style: TextStyle(
-                            fontFamily: 'serif',
-                            fontSize: compact ? 12 : 14,
-                            height: 1,
-                            color: i < difficulty
-                                ? const Color(0xFFC83B32)
-                                : const Color(0xFFB7A99A),
-                            shadows: const [
-                              Shadow(
-                                color: Color(0x30000000),
-                                offset: Offset(0, 1),
-                                blurRadius: 1,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
+    );
+    return Stack(
+      children: [
+        card,
+        Positioned(
+          top: 0,
+          right: 0,
+          child: Semantics(
+            button: true,
+            label: 'Chi tiết nhiệm vụ ${quest.title}',
+            child: InkResponse(
+              key: ValueKey('city-quest-info-${quest.id}'),
+              onTap: quest.onInfo,
+              radius: 18,
+              child: const SizedBox(
+                width: 34,
+                height: 34,
+                child: Icon(Icons.info_outline, size: 17, color: Pal.text),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
 class _QuestData {
   const _QuestData({
+    required this.id,
     required this.title,
     required this.description,
     required this.difficulty,
     required this.isGolden,
+    this.selected = false,
     this.onTap,
+    this.onInfo,
   });
 
+  final int id;
+  final bool selected;
   final VoidCallback? onTap;
+
+  /// Mở thẻ chi tiết (không nhận nhiệm vụ).
+  final VoidCallback? onInfo;
   final String title;
   final String description;
   final int difficulty;

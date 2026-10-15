@@ -5,12 +5,12 @@ import '../../domain/building_effects.dart';
 /// Tên hiển thị của từng chỉ số (dùng cho tooltip/semantics).
 const effectStatNames = <EffectStat, String>{
   EffectStat.hp: 'HP',
-  EffectStat.energy: 'Năng lượng',
+  EffectStat.energy: 'Thể lực',
   EffectStat.morale: 'Tinh thần',
   EffectStat.strength: 'Sức mạnh',
   EffectStat.speed: 'Tốc độ',
-  EffectStat.stamina: 'Thể lực',
-  EffectStat.attack: 'Tấn công',
+  EffectStat.stamina: 'Thể hình',
+  EffectStat.attack: 'Công',
 };
 
 /// Màu nhận diện của từng chỉ số (đủ tương phản trên cả nền tối lẫn giấy da).
@@ -229,12 +229,11 @@ class EffectCell extends StatelessWidget {
         label: '${effectStatNames[effect.stat]} ${effect.level.symbol}',
         excludeSemantics: true,
         child: SizedBox(
-          width: iconSize + 12,
+          width: iconSize + 10,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               StatIcon(effect.stat, size: iconSize),
-              const SizedBox(height: 2),
               Text(
                 effect.level.symbol,
                 key: ValueKey('effect-sign-${effect.stat.name}'),

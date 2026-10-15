@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
+import '../../domain/combat_condition.dart';
 import '../../domain/models.dart';
 import '../../domain/progression.dart';
 import '../../domain/rules.dart';
 import '../../domain/stats.dart';
 import '../widgets/art.dart';
 import '../widgets/common.dart';
+import '../widgets/soldier_condition_widgets.dart';
+import '../../domain/building_effects.dart';
+import '../widgets/camp/soldier_info_dialog.dart';
+import '../widgets/rename_dialog.dart';
 import '../widgets/progression_panels.dart';
 
 class RosterScreen extends StatefulWidget {
@@ -145,7 +150,10 @@ class _SoldierTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            SoldierSprite.of(s, size: 42),
+            LevelUpMark(
+              show: s.alive && s.statPoints > 0,
+              child: SoldierSprite.of(s, size: 42),
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Column(
@@ -186,9 +194,42 @@ class _SoldierTile extends StatelessWidget {
                                 .name,
                             color: Pal.gold,
                           ),
-                        if (s.morale < 35)
-                          const Pill('Tinh thần thấp', color: Pal.blood),
                       ],
+                    ),
+                  // Năng lượng và tinh thần: tô theo tỷ lệ thực tế, đỏ khi dưới 50%.
+                  if (s.alive)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          VitalMeter(
+                            key: ValueKey('vital-energy-${s.id}'),
+                            stat: EffectStat.energy,
+                            value: s.energy,
+                            max: energyCap(s),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 4),
+                          VitalMeter(
+                            key: ValueKey('vital-morale-${s.id}'),
+                            stat: EffectStat.morale,
+                            value: s.morale,
+                            max: moraleCap(s),
+                            size: 20,
+                          ),
+                          if (s.statPoints > 0) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '+${s.statPoints} điểm',
+                              style: const TextStyle(
+                                color: Pal.gold,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                 ],
               ),
@@ -347,12 +388,25 @@ class _Detail extends StatelessWidget {
               const SizedBox(height: 4),
               const SizedBox(height: 3),
               Text(
-                'Tinh thần ${so.morale}',
+                'Tinh thần ${so.morale}/${moraleCap(so)}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               Bar(
-                value: so.morale / 100,
-                color: so.morale >= 50 ? Pal.moss : Pal.blood,
+                value: so.morale / moraleCap(so),
+                color: so.morale / moraleCap(so) >= vitalWarnBelow
+                    ? Pal.moss
+                    : Pal.blood,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Thể lực ${so.energy}/${energyCap(so)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              Bar(
+                value: so.energy / energyCap(so),
+                color: so.energy / energyCap(so) >= vitalWarnBelow
+                    ? Pal.gold
+                    : Pal.blood,
               ),
               const SizedBox(height: 3),
               Text(
@@ -396,9 +450,51 @@ class _Detail extends StatelessWidget {
                               color: Pal.moss,
                             ),
                           ),
+                        if (so.statPoints > 0) ...[
+                          const SizedBox(width: 6),
+                          PlusStatButton(
+                            key: ValueKey('roster-plus-${st.name}'),
+                            onPressed: () =>
+                                controller.allocateStat(so.id, switch (st) {
+                                  Stat.str => MainStat.strength,
+                                  Stat.dex => MainStat.speed,
+                                  Stat.con => MainStat.build,
+                                }),
+                          ),
+                        ],
                       ],
                     ),
                   ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1.5),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Công', style: TextStyle(fontSize: 12)),
+                      ),
+                      Text(
+                        '${dv.core.atk}',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (dv.core.atk != so.atkPoints)
+                        Text(
+                          ' (${so.atkPoints}${statDelta(so.atkPoints, dv.core.atk)})',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Pal.moss,
+                          ),
+                        ),
+                      if (so.statPoints > 0) ...[
+                        const SizedBox(width: 6),
+                        PlusStatButton(
+                          key: const ValueKey('roster-plus-attack'),
+                          onPressed: () =>
+                              controller.allocateStat(so.id, MainStat.attack),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -406,10 +502,12 @@ class _Detail extends StatelessWidget {
           Expanded(
             child: Column(
               children: [
-                _kv('Máu', '${dv.maxHp}'),
-                _kv('Công', dv.attack.toStringAsFixed(1)),
+                _kv('HP', '${dv.maxHp}'),
+                _kv('Thể lực', '${dv.maxEnergy}'),
+                _kv('Tinh thần', '${dv.maxMorale}'),
+                _kv('Sát thương', dv.damageRange),
                 _kv('Giảm sát thương', '${(dv.reduction * 100).round()}%'),
-                _kv('Tốc độ', '${dv.speed.toStringAsFixed(1)} m/s'),
+                _kv('Di chuyển', '${dv.speed.toStringAsFixed(1)} m/s'),
                 _kv('Chu kỳ đánh', '${dv.interval.toStringAsFixed(1)} s'),
                 _kv('Chính xác', '${(dv.accuracy * 100).round()}%'),
                 _kv('Chí mạng', '${(dv.crit * 100).round()}%'),
@@ -431,11 +529,18 @@ class _Detail extends StatelessWidget {
       title: 'Trang bị',
       child: Row(
         children: [
-          // Phụ kiện (bùa, nhẫn…) không hiển thị ở màn hình này.
-          for (final slot in Slot.values.where((x) => x != Slot.accessory))
+          for (final slot in Slot.values)
             Expanded(
               child: InkWell(
-                onTap: () => showEquipDialog(context, controller, so, slot),
+                onTap: () => so.equipped(slot) == null
+                    ? showEmptySlotInfo(context, slot)
+                    : showGearDetail(
+                        context,
+                        controller,
+                        so,
+                        ref: so.equipped(slot)!,
+                        slot: slot,
+                      ),
                 borderRadius: BorderRadius.circular(6),
                 child: Padding(
                   padding: const EdgeInsets.all(3),
@@ -446,7 +551,7 @@ class _Detail extends StatelessWidget {
                       Text(
                         so.equipped(slot) == null
                             ? '${slotNames[slot]}: trống'
-                            : itemDefs[so.equipped(slot)]!.name,
+                            : itemDisplayName(so.equipped(slot)!),
                         maxLines: 2,
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 10.5),
@@ -520,10 +625,12 @@ class _Detail extends StatelessWidget {
                 GameButton(
                   dense: true,
                   label:
-                      '${facilityDefs[f.type]!.name} ${f.assigned.length}/${f.slots}',
+                      '${facilityDefs[f.type]!.name} ${f.assigned.length}/${GameRules.slotsOf(s, f)}',
                   lockedReason: f.assigned.contains(so.id)
                       ? 'Đang ở đây'
-                      : (f.assigned.length >= f.slots ? 'Đầy' : null),
+                      : (f.assigned.length >= GameRules.slotsOf(s, f)
+                            ? 'Đầy'
+                            : null),
                   onPressed: () =>
                       toast(context, controller.assignToFacility(so.id, f.id)),
                 ),
@@ -613,394 +720,6 @@ class _Detail extends StatelessWidget {
     ),
   );
 
-  Future<void> _rename(BuildContext context) async {
-    final ctl = TextEditingController(text: soldier.name);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Đổi tên binh sĩ'),
-        content: SizedBox(
-          width: 320,
-          child: TextField(
-            controller: ctl,
-            autofocus: true,
-            maxLength: 24,
-            decoration: const InputDecoration(border: OutlineInputBorder()),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Hủy'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctl.text),
-            child: const Text('Lưu'),
-          ),
-        ],
-      ),
-    );
-    if (name != null && context.mounted) {
-      toast(context, controller.rename(soldier.id, name));
-    }
-  }
-}
-
-Future<void> showEquipDialog(
-  BuildContext context,
-  GameController c,
-  Soldier so,
-  Slot slot,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (ctx) => _EquipDialog(controller: c, soldier: so, slot: slot),
-  );
-}
-
-class _EquipDialog extends StatefulWidget {
-  const _EquipDialog({
-    required this.controller,
-    required this.soldier,
-    required this.slot,
-  });
-
-  final GameController controller;
-  final Soldier soldier;
-  final Slot slot;
-
-  @override
-  State<_EquipDialog> createState() => _EquipDialogState();
-}
-
-class _EquipDialogState extends State<_EquipDialog> {
-  String? _pick;
-  WeaponType? _type; // lọc nhóm vũ khí (chỉ ô Vũ khí)
-  int _sort = 0; // 0 phẩm cấp, 1 tên, 2 chỉ số chính
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.controller;
-    final s = c.state!;
-    final so = widget.soldier;
-    final slot = widget.slot;
-    final items =
-        [
-          for (final e in s.inventory.entries)
-            if (e.value > 0 &&
-                itemDefs[e.key]!.slot == slot &&
-                (_type == null || itemDefs[e.key]!.weaponType == _type))
-              itemDefs[e.key]!,
-        ]..sort((a, b) {
-          if (_sort == 1) return a.name.compareTo(b.name);
-          if (_sort == 2) {
-            final c = (b.damage + b.defense).compareTo(a.damage + a.defense);
-            if (c != 0) return c;
-          }
-          return a.tier != b.tier
-              ? a.tier.compareTo(b.tier)
-              : a.name.compareTo(b.name);
-        });
-    final cur = so.equipped(slot);
-    final before = deriveStats(so);
-    final pick = _pick == null ? null : itemDefs[_pick];
-    final after = pick == null
-        ? before
-        : deriveStats(so, override: {slot: pick.id});
-    final problem = pick == null ? null : equipProblem(so, pick);
-    final size = MediaQuery.sizeOf(context);
-
-    Widget row(
-      String k,
-      num b,
-      num a, {
-      int digits = 0,
-      bool lowerBetter = false,
-      String suffix = '',
-    }) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(child: Text(k, style: const TextStyle(fontSize: 12))),
-          Text(
-            '${b.toStringAsFixed(digits)}$suffix',
-            style: const TextStyle(color: Pal.dim),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(Icons.arrow_right_alt, size: 14, color: Pal.dim),
-          ),
-          Text(
-            '${a.toStringAsFixed(digits)}$suffix',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: deltaColor(b, a, lowerBetter: lowerBetter),
-            ),
-          ),
-          SizedBox(
-            width: 46,
-            child: Text(
-              statDelta(b, a, digits: digits),
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                color: deltaColor(b, a, lowerBetter: lowerBetter),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    return Dialog(
-      insetPadding: const EdgeInsets.all(12),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 640,
-          maxHeight: size.height * 0.88,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${slotNames[slot]} của ${so.name}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              Flexible(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 5,
-                      child: Column(
-                        children: [
-                          Wrap(
-                            spacing: 4,
-                            runSpacing: 2,
-                            children: [
-                              if (slot == Slot.weapon) ...[
-                                ChoiceChip(
-                                  label: const Text('Tất cả'),
-                                  visualDensity: VisualDensity.compact,
-                                  selected: _type == null,
-                                  onSelected: (_) =>
-                                      setState(() => _type = null),
-                                ),
-                                for (final t in WeaponType.values)
-                                  ChoiceChip(
-                                    key: ValueKey('equip-filter-${t.name}'),
-                                    label: Text(weaponProfiles[t]!.name),
-                                    visualDensity: VisualDensity.compact,
-                                    selected: _type == t,
-                                    onSelected: (_) =>
-                                        setState(() => _type = t),
-                                  ),
-                              ],
-                              ActionChip(
-                                key: const ValueKey('equip-sort'),
-                                label: Text(
-                                  const [
-                                    'Xếp: phẩm cấp',
-                                    'Xếp: tên',
-                                    'Xếp: chỉ số',
-                                  ][_sort],
-                                ),
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () =>
-                                    setState(() => _sort = (_sort + 1) % 3),
-                              ),
-                            ],
-                          ),
-                          Expanded(
-                            child: items.isEmpty
-                                ? const Center(
-                                    child: Text(
-                                      'Kho không có vật phẩm phù hợp. Mua ở Lò rèn hoặc nhận từ nhiệm vụ.',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: Pal.dim),
-                                    ),
-                                  )
-                                : ListView(
-                                    shrinkWrap: true,
-                                    children: [
-                                      for (final it in items)
-                                        ListTile(
-                                          dense: true,
-                                          selected: _pick == it.id,
-                                          selectedTileColor: Pal.panelHi,
-                                          leading: ItemGlyph(it.id, size: 34),
-                                          title: Text(
-                                            '${it.name} ×${s.inventory[it.id]}',
-                                            style: TextStyle(
-                                              fontSize: 12.5,
-                                              color:
-                                                  equipProblem(so, it) == null
-                                                  ? Pal.text
-                                                  : Pal.dim,
-                                            ),
-                                          ),
-                                          subtitle: Text(
-                                            equipProblem(so, it) ??
-                                                _itemLine(it),
-                                            style: TextStyle(
-                                              fontSize: 10.5,
-                                              color:
-                                                  equipProblem(so, it) == null
-                                                  ? Pal.dim
-                                                  : Pal.blood,
-                                            ),
-                                          ),
-                                          onTap: () =>
-                                              setState(() => _pick = it.id),
-                                        ),
-                                    ],
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 5,
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              cur == null
-                                  ? 'Đang trống'
-                                  : 'Đang dùng: ${itemDefs[cur]!.name}',
-                              style: const TextStyle(
-                                color: Pal.gold,
-                                fontSize: 12,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              pick == null
-                                  ? 'Chọn vật phẩm để xem so sánh'
-                                  : 'Trước → Sau khi trang bị ${pick.name}',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                            const SizedBox(height: 4),
-                            row('Máu', before.maxHp, after.maxHp),
-                            row('Công', before.attack, after.attack, digits: 1),
-                            row(
-                              'Giảm sát thương',
-                              before.reduction * 100,
-                              after.reduction * 100,
-                              suffix: '%',
-                            ),
-                            row(
-                              'Tốc độ',
-                              before.speed,
-                              after.speed,
-                              digits: 1,
-                              suffix: ' m/s',
-                            ),
-                            row(
-                              'Chính xác',
-                              before.accuracy * 100,
-                              after.accuracy * 100,
-                              suffix: '%',
-                            ),
-                            row(
-                              'Chu kỳ đánh',
-                              before.interval,
-                              after.interval,
-                              digits: 1,
-                              suffix: ' s',
-                              lowerBetter: true,
-                            ),
-                            row(
-                              'Tầm đánh',
-                              before.range,
-                              after.range,
-                              digits: 1,
-                              suffix: ' m',
-                            ),
-                            row('Xuyên giáp', before.armorPen, after.armorPen),
-                            row(
-                              'Chí mạng',
-                              before.crit * 100,
-                              after.crit * 100,
-                              suffix: '%',
-                            ),
-                            const SizedBox(height: 8),
-                            if (problem != null)
-                              Text(
-                                problem,
-                                style: const TextStyle(
-                                  color: Pal.blood,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 6,
-                              children: [
-                                GameButton(
-                                  label: 'Trang bị',
-                                  dense: true,
-                                  onPressed: pick == null || problem != null
-                                      ? null
-                                      : () {
-                                          final r = c.equip(so.id, pick.id);
-                                          toast(context, r);
-                                          if (r.ok) Navigator.pop(context);
-                                        },
-                                ),
-                                if (cur != null)
-                                  GameButton(
-                                    label: 'Tháo ra',
-                                    dense: true,
-                                    danger: true,
-                                    onPressed: () {
-                                      toast(context, c.unequip(so.id, slot));
-                                      Navigator.pop(context);
-                                    },
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _itemLine(ItemDef it) {
-    final parts = <String>[
-      if (it.weaponType != null) weaponProfiles[it.weaponType]!.name,
-      'Phẩm ${it.tier}',
-      if (it.damage > 0) 'Công +${it.damage}',
-      if (it.defense > 0) 'Giáp +${it.defense}',
-      if (it.weaponType != null)
-        '${it.interval.toStringAsFixed(1)}s • ${it.range.toStringAsFixed(1)}m',
-      if (it.totalArmorPen > 0) 'Xuyên ${it.totalArmorPen}',
-      if (it.speed != 0) 'Tốc ${it.speed > 0 ? '+' : ''}${it.speed}',
-      for (final b in it.bonus.entries) '${statNames[b.key]} +${b.value}',
-    ];
-    return parts.join(' • ');
-  }
+  Future<void> _rename(BuildContext context) =>
+      showRenameSoldierDialog(context, controller, soldier);
 }

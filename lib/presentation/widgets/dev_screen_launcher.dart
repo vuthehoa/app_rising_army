@@ -19,11 +19,12 @@ class DevScreenLauncher extends StatelessWidget {
     ControllerScope.of(context);
     if (!DevMode.enabled) return const SizedBox.shrink();
 
+    // Giữa mép trên, ngay bên phải nút Develop Mode (cùng một dải trên cùng): góc dưới-trái từng che các nút hành động ở màn hẹp (xem DevModeToggle).
     return Align(
-      alignment: Alignment.bottomLeft,
+      alignment: Alignment.topCenter,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 34),
+          padding: const EdgeInsets.fromLTRB(104, 4, 4, 4),
           child: Material(
             key: const ValueKey('dev-screens-button'),
             color: const Color(0xFFFFB300),

@@ -10,11 +10,15 @@ class CampBadge extends StatelessWidget {
     required this.text,
     required this.tip,
     this.onTap,
+    this.warn = false,
   });
 
   final IconData icon;
   final String text, tip;
   final VoidCallback? onTap;
+
+  /// Làm nổi bật khi đầy/cảnh báo (chỉ đổi màu, không đổi hành vi).
+  final bool warn;
 
   @override
   Widget build(BuildContext context) => Tooltip(
@@ -22,23 +26,25 @@ class CampBadge extends StatelessWidget {
     child: GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        constraints: const BoxConstraints(minHeight: 36),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFF3DDB0),
+          color: warn ? const Color(0xFFF2B8A8) : const Color(0xFFF3DDB0),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Pal.ink, width: 2),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 15, color: Pal.ink),
+            Icon(icon, size: 17, color: Pal.ink),
             const SizedBox(width: 4),
             Text(
               text,
               style: const TextStyle(
                 color: Pal.ink,
                 fontWeight: FontWeight.w900,
-                fontSize: 12,
+                fontSize: 13,
               ),
             ),
           ],

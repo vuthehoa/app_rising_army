@@ -199,9 +199,20 @@ void main() {
         expect(c(TerrainType.forest), lessThan(c(TerrainType.denseForest)));
         expect(c(TerrainType.denseForest), lessThan(c(TerrainType.mountain)));
         expect(c(TerrainType.hill), greaterThan(c(TerrainType.plain)));
+        // "passable" = đi bộ thường (đất liền); nước và vách đá vẫn VƯỢT QUA ĐƯỢC (traversable) với chi phí cao.
         expect(TerrainRules.passable(TerrainType.water), isFalse);
         expect(TerrainRules.passable(TerrainType.cliff), isFalse);
         expect(TerrainRules.passable(TerrainType.mountain), isTrue);
+        for (final t in TerrainType.values) {
+          expect(
+            TerrainRules.traversable(t),
+            t != TerrainType.outOfBounds,
+            reason: t.name,
+          );
+        }
+        expect(c(TerrainType.water), greaterThan(c(TerrainType.mountain)));
+        expect(c(TerrainType.cliff), greaterThan(c(TerrainType.mountain)));
+        expect(c(TerrainType.water, trail: true), c(TerrainType.water));
         expect(c(TerrainType.bridge, trail: true), c(TerrainType.bridge));
       },
     );

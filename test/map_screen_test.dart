@@ -187,21 +187,26 @@ void main() {
     },
   );
 
-  testWidgets('chạm mặt sông bị từ chối, không đi', (t) async {
-    final c = await boot(t, const Size(844, 390));
-    final river = worldMap.rivers.first.path.points[40];
-    await relocate(t, c, WPoint(river.x - 140, river.y));
-    expect(worldMap.isPassable(c.state!.hero.position), isTrue);
-    final delta = Offset(140 * _zoom0, 0);
-    await t.tapAt(at(t, delta));
-    await t.pump();
-    expect(c.travel.moving, isFalse);
-    expect(find.textContaining('mặt nước'), findsOneWidget);
-    await t.pump(const Duration(seconds: 4));
-    await t.pumpAndSettle();
-  });
+  testWidgets(
+    'chạm mặt sông được nhận (tốn thêm thể lực), chip hiển thị chi phí',
+    (t) async {
+      final c = await boot(t, const Size(844, 390));
+      final river = worldMap.rivers.first.path.points[40];
+      await relocate(t, c, WPoint(river.x - 140, river.y));
+      expect(worldMap.isPassable(c.state!.hero.position), isTrue);
+      final delta = Offset(140 * _zoom0, 0);
+      await t.tapAt(at(t, delta));
+      await t.pump();
+      expect(c.travel.moving, isTrue);
+      expect(find.byKey(const ValueKey('map-route-chip')), findsOneWidget);
+      expect(find.textContaining('thể lực'), findsWidgets);
+      c.travel.cancel();
+      await t.pump(const Duration(seconds: 4));
+      await t.pumpAndSettle();
+    },
+  );
 
-  testWidgets('đi thẳng tới sông thì dừng ở bờ kèm thông báo', (t) async {
+  testWidgets('đi thẳng qua sông: tới nơi bên kia, thể lực giảm', (t) async {
     final c = await boot(t, const Size(844, 390));
     // Bờ tây Sông Bạc, nhìn sang đông ở chỗ không có cầu.
     await relocate(t, c, const WPoint(1000, 700));
@@ -209,13 +214,14 @@ void main() {
       at(t, const Offset(300, 0)),
     ); // điểm cách 353 đơn vị: sông ở giữa
     await t.pump();
-    // Đích nằm bên kia sông nhưng chạm vào đất liền hợp lệ: được nhận lệnh, rồi bị chặn giữa đường.
+    // Đích nằm bên kia sông: nay đi qua được (tốn nhiều thể lực hơn đồng bằng), không còn dừng ở bờ.
+    final stamina0 = c.state!.hero.stamina;
     if (c.travel.moving) {
       await walkFor(t, 5000);
       expect(c.travel.moving, isFalse);
     }
-    expect(worldMap.isPassable(c.state!.hero.position), isTrue);
-    expect(c.state!.hero.x, lessThan(1300));
+    expect(c.state!.hero.x, greaterThan(1300));
+    expect(stamina0 - c.state!.hero.stamina, greaterThan(0));
     await t.pumpAndSettle(const Duration(seconds: 5));
   });
 
@@ -319,7 +325,7 @@ void main() {
   });
 
   testWidgets(
-    'thị trấn vùng chưa mở: tới nơi nhưng không vào, không mở CityScreen',
+    'thành phố luôn mở: thị trấn ở vùng xa vẫn vào được khi tới nơi',
     (t) async {
       final c = await boot(t, const Size(932, 430));
       final town = worldMap.townById('n_keep')!;
@@ -328,8 +334,8 @@ void main() {
       await walkFor(t, 2000);
       await t.pump(const Duration(seconds: 4));
       expect(c.state!.hero.position, town.position);
-      expect(c.state!.visiting, isNull);
-      expect(find.byType(CityScreen), findsNothing);
+      expect(c.state!.visiting, 'n_keep');
+      expect(find.byType(CityScreen), findsOneWidget);
       await t.pumpAndSettle();
     },
   );

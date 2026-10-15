@@ -1,213 +1,44 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
+import '../../domain/economy.dart';
 import '../../domain/models.dart';
-import '../../domain/progression.dart';
 import '../../domain/rules.dart';
-import '../../domain/stats.dart';
 import '../widgets/art.dart';
 import '../widgets/common.dart';
+import '../widgets/item_kit.dart';
 import '../widgets/hud.dart';
 
-/// Màn hình người bán: danh sách hàng, chi tiết, so sánh chỉ số trước/sau, mua/bán.
-class VendorScreen extends StatefulWidget {
+/// Thứ được kéo giữa hai rương: hoặc một vật phẩm trang bị ([item] = mã tham chiếu) hoặc một tài nguyên ([res]).
+/// [fromShop] = true: kéo từ hàng cửa hàng sang rương người chơi (MUA); false: ngược lại (BÁN).
+class TradeDrag {
+  const TradeDrag.item(this.item, {required this.fromShop}) : res = null;
+  const TradeDrag.res(this.res, {required this.fromShop}) : item = null;
+  final String? item;
+  final Res? res;
+  final bool fromShop;
+}
+
+/// Màn hình người bán dạng HAI RƯƠNG: bên trái hàng của cửa hàng (mua), bên phải rương của người chơi (bán).
+/// Kéo một ô sang rương bên kia để giao dịch 1 đơn vị; chạm một ô mở popup chi tiết (chỉ xem, hoặc chọn số lượng
+/// rồi xác nhận). Mọi giá, tồn kho, trọng lượng đều đọc từ `GameRules`/`MarketEconomy`, không tính lại ở widget.
+class VendorScreen extends StatelessWidget {
   const VendorScreen({super.key, required this.vendorId});
 
   final String vendorId;
 
-  @override
-  State<VendorScreen> createState() => _VendorScreenState();
-}
-
-class _VendorScreenState extends State<VendorScreen> {
-  bool _buy = true;
-  String? _item;
-  Res? _res;
-  int _qty = 1;
-  int? _soldier;
-
-  VendorDef get vendor => vendorById(widget.vendorId)!;
-
-  void _select({String? item, Res? res}) => setState(() {
-    _item = item;
-    _res = res;
-    _qty = 1;
-  });
+  VendorDef get vendor => vendorById(vendorId)!;
 
   @override
   Widget build(BuildContext context) {
     final c = ControllerScope.of(context);
     final s = c.state!;
     final v = vendor;
-    final d = Dims(context);
-    final st = GameRules.peekStock(s, v);
     final open = GameRules.vendorOpen(s, v) && s.visiting == v.cityId;
-
-    // Danh sách mục theo tab.
-    final buyItems = [for (final id in st.items.keys) itemDefs[id]!];
-    final sellItems = [
-      for (final e in s.inventory.entries)
-        if (e.value > 0 && GameRules.buysItem(v, itemDefs[e.key]!))
-          itemDefs[e.key]!,
-    ];
-    final resList = [for (final r in st.resources.keys) r];
-
-    Widget row({
-      required Widget leading,
-      required String title,
-      required String sub,
-      required String trailing,
-      required bool selected,
-      required VoidCallback onTap,
-      bool dim = false,
-    }) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Opacity(
-          opacity: dim ? 0.5 : 1,
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 4),
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: selected ? Pal.panelHi : Pal.bg.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: selected ? Pal.gold : Pal.line,
-                width: selected ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                leading,
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      Text(
-                        sub,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Pal.dim, fontSize: 10.5),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  trailing,
-                  style: const TextStyle(
-                    color: Pal.gold,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    final list = Panel(
-      fill: true,
-      padding: EdgeInsets.all(d.pad - 2),
-      child: Column(
-        children: [
-          SegmentedButton<bool>(
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              textStyle: const TextStyle(fontSize: 11),
-            ),
-            segments: const [
-              ButtonSegment(value: true, label: Text('Mua')),
-              ButtonSegment(value: false, label: Text('Bán')),
-            ],
-            selected: {_buy},
-            onSelectionChanged: (x) => setState(() {
-              _buy = x.first;
-              _item = null;
-              _res = null;
-              _qty = 1;
-            }),
-          ),
-          const SizedBox(height: 6),
-          Expanded(
-            child: ListView(
-              children: [
-                if (_buy) ...[
-                  for (final it in buyItems)
-                    row(
-                      leading: ItemGlyph(it.id, size: 34),
-                      title: it.name,
-                      sub: (st.items[it.id] ?? 0) > 0
-                          ? 'Còn ${st.items[it.id]} • ${slotNames[it.slot]} • phẩm ${it.grade} • cần cấp ${it.reqLevel}'
-                          : 'Hết hàng',
-                      trailing: '${GameRules.buyPrice(v, it.id)}',
-                      selected: _item == it.id,
-                      dim: (st.items[it.id] ?? 0) == 0,
-                      onTap: () => _select(item: it.id),
-                    ),
-                  for (final r in resList)
-                    row(
-                      leading: Icon(resIcons[r], color: Pal.gold),
-                      title: '${resNames[r]} ×$resourceLotSize',
-                      sub: (st.resources[r] ?? 0) > 0
-                          ? 'Còn ${st.resources[r]} lô'
-                          : 'Hết hàng',
-                      trailing: '${GameRules.resourceBuyPrice(v, r)}',
-                      selected: _res == r,
-                      dim: (st.resources[r] ?? 0) == 0,
-                      onTap: () => _select(res: r),
-                    ),
-                ] else ...[
-                  if (sellItems.isEmpty && resList.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        'Không có gì để bán ở đây.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  for (final it in sellItems)
-                    row(
-                      leading: ItemGlyph(it.id, size: 34),
-                      title: it.name,
-                      sub: 'Trong kho: ${s.inventory[it.id]}',
-                      trailing: '${GameRules.sellPrice(it.id)}',
-                      selected: _item == it.id,
-                      onTap: () => _select(item: it.id),
-                    ),
-                  for (final r in resList)
-                    row(
-                      leading: Icon(resIcons[r], color: Pal.gold),
-                      title: '${resNames[r]} ×$resourceLotSize',
-                      sub: 'Bạn có ${s.res[r]}',
-                      trailing: '${GameRules.resourceSellPrice(r)}',
-                      selected: _res == r,
-                      dim: s.res[r]! < resourceLotSize,
-                      onTap: () => _select(res: r),
-                    ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 40,
@@ -224,442 +55,455 @@ class _VendorScreenState extends State<VendorScreen> {
       ),
       body: SafeArea(
         child: Padding(
-          padding: EdgeInsets.all(d.pad),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(width: d.compact ? 250 : 300, child: list),
-              SizedBox(width: d.gap),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: !open
-                      ? const Panel(
-                          child: Text(
-                            'Bạn không còn ở thành phố này hoặc người bán chưa mở cửa.',
-                          ),
-                        )
-                      : _detail(context, c, s, v, st),
-                ),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.all(6),
+          child: !open
+              ? const Panel(
+                  child: Text(
+                    'Bạn không còn ở thành phố này hoặc người bán chưa mở cửa.',
+                  ),
+                )
+              : _TwoChests(c: c, vendor: v),
         ),
       ),
     );
   }
+}
 
-  Widget _detail(
-    BuildContext context,
-    GameController c,
-    GameState s,
-    VendorDef v,
-    ShopStock st,
-  ) {
-    if (_item == null && _res == null) {
-      return Panel(
-        title: v.name,
-        child: Text(
-          '${v.blurb}\nChọn một mặt hàng bên trái. Giá mua lại của người bán luôn thấp hơn giá bán ra.\n'
-          'Kho đồ: ${GameRules.inventoryCount(s)}/${GameRules.inventoryCapacity(s)}.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      );
-    }
-    if (_res != null) return _resourceDetail(context, c, s, v, st, _res!);
-    return _itemDetail(context, c, s, v, st, itemDefs[_item!]!);
-  }
+class _TwoChests extends StatelessWidget {
+  const _TwoChests({required this.c, required this.vendor});
+  final GameController c;
+  final VendorDef vendor;
 
-  Widget _qtyRow(int max, String unit) {
-    final q = _qty.clamp(1, max < 1 ? 1 : max);
-    return Row(
-      children: [
-        IconButton.outlined(
-          visualDensity: VisualDensity.compact,
-          tooltip: 'Giảm',
-          onPressed: q > 1 ? () => setState(() => _qty = q - 1) : null,
-          icon: const Icon(Icons.remove),
-        ),
-        SizedBox(
-          width: 46,
-          child: Text(
-            '$q',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+  GameState get s => c.state!;
+
+  @override
+  Widget build(BuildContext context) {
+    final stock = GameRules.peekStock(s, vendor);
+    final shopTiles = <Widget>[
+      if (vendor.kind == VendorKind.smithy)
+        for (final id in stock.items.keys)
+          _tile(
+            key: ValueKey('shop-item-$id'),
+            drag: TradeDrag.item(id, fromShop: true),
+            glyph: ItemGlyph(id, size: 34),
+            name: itemDefs[id]!.name,
+            qty: stock.items[id] ?? 0,
+            price: GameRules.buyPrice(vendor, id),
+            state: _shopState(
+              stock.items[id] ?? 0,
+              GameRules.buyPrice(vendor, id),
+              GameRules.itemWeightTenths(id),
+            ),
+            onTap: () =>
+                _openDetail(context, TradeDrag.item(id, fromShop: true)),
           ),
+      if (vendor.kind == VendorKind.market)
+        for (final r in stock.resources.keys)
+          _tile(
+            key: ValueKey('shop-res-${r.name}'),
+            drag: TradeDrag.res(r, fromShop: true),
+            glyph: Icon(resIcons[r], color: Pal.gold, size: 30),
+            name: resNames[r]!,
+            qty: stock.resources[r] ?? 0,
+            price: GameRules.resourceBuyPrice(vendor, r),
+            state: _shopState(
+              stock.resources[r] ?? 0,
+              GameRules.resourceBuyPrice(vendor, r),
+              WeightEconomy.ofResource(r, 1),
+            ),
+            onTap: () => _openDetail(context, TradeDrag.res(r, fromShop: true)),
+          ),
+    ];
+
+    final sellsItems = vendor.kind == VendorKind.smithy;
+    bool buysRes(Res r) =>
+        vendor.kind == VendorKind.market && vendor.resources.containsKey(r);
+    final chestTiles = <Widget>[
+      for (final e in s.inventory.entries)
+        if (e.value > 0)
+          _tile(
+            key: ValueKey('chest-item-${e.key}'),
+            drag: TradeDrag.item(e.key, fromShop: false),
+            glyph: ItemGlyph(e.key, size: 34),
+            name: itemDisplayName(e.key),
+            qty: e.value,
+            price: GameRules.sellPrice(e.key),
+            state: sellsItems ? ItemTileState.ok : ItemTileState.blocked,
+            note: sellsItems ? null : 'Không thu mua',
+            onTap: () =>
+                _openDetail(context, TradeDrag.item(e.key, fromShop: false)),
+          ),
+      for (final r in Res.values)
+        if (r != Res.coins && (s.res[r] ?? 0) > 0)
+          _tile(
+            key: ValueKey('chest-res-${r.name}'),
+            drag: TradeDrag.res(r, fromShop: false),
+            glyph: Icon(resIcons[r], color: Pal.gold, size: 30),
+            name: resNames[r]!,
+            qty: s.res[r]!,
+            price: MarketEconomy.tradable(r)
+                ? GameRules.resourceSellPrice(r)
+                : 0,
+            state: buysRes(r) ? ItemTileState.ok : ItemTileState.blocked,
+            note: buysRes(r) ? null : 'Không thu mua',
+            onTap: () =>
+                _openDetail(context, TradeDrag.res(r, fromShop: false)),
+          ),
+    ];
+
+    final w = GameRules.inventoryWeightTenths(s);
+    final cap = GameRules.inventoryCapacityTenths(s);
+    final over = w > cap;
+    final ratio = w / max(1, cap);
+    return Column(
+      children: [
+        Row(
+          key: const ValueKey('trade-header'),
+          children: [
+            const Icon(Icons.monetization_on, size: 16, color: Pal.gold),
+            const SizedBox(width: 4),
+            Text(
+              'Vàng ${s.res[Res.coins]}',
+              key: const ValueKey('trade-gold'),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(width: 14),
+            const Icon(Icons.inventory_2, size: 16, color: Pal.text),
+            const SizedBox(width: 4),
+            Text(
+              'Rương ${GameRules.inventoryWeightKg(s)}/${GameRules.inventoryCapacity(s)} kg',
+              key: const ValueKey('trade-weight'),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: over ? Pal.blood : Pal.text,
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 90,
+              child: Bar(
+                value: ratio.clamp(0.0, 1.0),
+                color: over || ratio > 0.9 ? Pal.blood : Pal.moss,
+                height: 6,
+              ),
+            ),
+            const Spacer(),
+            const Flexible(
+              child: Text(
+                'Kéo ô sang rương bên kia để giao dịch • Chạm để xem chi tiết',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Pal.dim, fontSize: 10.5),
+              ),
+            ),
+          ],
         ),
-        IconButton.outlined(
-          visualDensity: VisualDensity.compact,
-          tooltip: 'Tăng',
-          onPressed: q < max ? () => setState(() => _qty = q + 1) : null,
-          icon: const Icon(Icons.add),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'tối đa $max $unit',
-          style: const TextStyle(color: Pal.dim, fontSize: 11),
+        const SizedBox(height: 4),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _Chest(
+                  key: const ValueKey('shop-drop'),
+                  title: 'Hàng cửa hàng — Mua',
+                  gridKey: const ValueKey('shop-grid'),
+                  acceptsFromShop: false,
+                  tiles: shopTiles,
+                  empty: 'Hôm nay người bán không có hàng.',
+                  onDrop: (d) => _trade(context, d),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _Chest(
+                  key: const ValueKey('chest-drop'),
+                  title: 'Rương của bạn — Bán',
+                  gridKey: const ValueKey('chest-grid'),
+                  acceptsFromShop: true,
+                  tiles: chestTiles,
+                  empty: 'Rương trống.',
+                  onDrop: (d) => _trade(context, d),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Future<void> _run(
-    BuildContext context,
-    GameController c,
-    int total,
-    GameState s,
-    ActionResult Function() action,
-  ) async {
-    if (_buy && total >= 100 ||
-        _buy && total * 2 > GameRules.spendableCoins(s)) {
-      final ok = await confirm(
-        context,
-        'Xác nhận mua',
-        'Chi $total vàng (bạn có ${s.res[Res.coins]}).',
-      );
-      if (!ok || !context.mounted) return;
+  ItemTileState _shopState(int stock, int price, int weightTenths) {
+    if (stock <= 0) return ItemTileState.soldOut;
+    if (GameRules.spendableCoins(s) < price) return ItemTileState.cantAfford;
+    if (GameRules.overloadReason(s, weightTenths) != null) {
+      return ItemTileState.overweight;
     }
-    final r = action();
-    if (context.mounted) {
-      toast(context, r);
-      setState(() => _qty = 1);
-    }
+    return ItemTileState.ok;
   }
 
-  Widget _itemDetail(
-    BuildContext context,
-    GameController c,
-    GameState s,
-    VendorDef v,
-    ShopStock st,
-    ItemDef it,
-  ) {
-    final unit = _buy
-        ? GameRules.buyPrice(v, it.id)
-        : GameRules.sellPrice(it.id);
-    final stock = st.items[it.id] ?? 0;
-    final owned = s.inventory[it.id] ?? 0;
-    final capLeft =
-        GameRules.inventoryCapacity(s) - GameRules.inventoryCount(s);
-    final maxQty = _buy
-        ? [
-            stock,
-            capLeft,
-            GameRules.spendableCoins(s) ~/ unit,
-          ].reduce((a, b) => a < b ? a : b)
-        : owned;
-    final qty = _qty.clamp(1, maxQty < 1 ? 1 : maxQty);
-    final total = unit * qty;
+  /// Một lần kéo-thả = giao dịch 1 đơn vị; kết quả (kể cả lý do thất bại) được báo bằng thông báo.
+  void _trade(BuildContext context, TradeDrag d) {
+    toast(context, _execute(d, 1));
+  }
 
-    // So sánh trước/sau cho một binh sĩ (chỉ đồ trang bị).
-    final soldiers = [for (final x in s.roster) x];
-    final cand = soldiers.where((x) => equipProblem(x, it) == null).toList();
-    final soldier =
-        soldiers.where((x) => x.id == _soldier).firstOrNull ??
-        (cand.isNotEmpty
-            ? cand.first
-            : (soldiers.isNotEmpty ? soldiers.first : null));
-    final before = soldier == null ? null : deriveStats(soldier);
-    final after = soldier == null
-        ? null
-        : deriveStats(soldier, override: {it.slot: it.id});
-    final problem = soldier == null ? null : equipProblem(soldier, it);
-
-    String? lock;
-    if (_buy) {
-      if (stock <= 0) {
-        lock = 'Hết hàng';
-      } else if (capLeft <= 0) {
-        lock = 'Kho đồ đầy';
-      } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
-        lock = 'Thiếu ${unit - s.res[Res.coins]!} vàng';
-      }
-    } else if (owned <= 0) {
-      lock = 'Không có trong kho';
+  ActionResult _execute(TradeDrag d, int qty) {
+    if (d.item != null) {
+      return d.fromShop
+          ? c.buyFromVendor(vendor.id, d.item!, qty)
+          : c.sellToVendor(vendor.id, d.item!, qty);
     }
+    return d.fromShop
+        ? c.buyResource(vendor.id, d.res!, qty)
+        : c.sellResource(vendor.id, d.res!, qty);
+  }
 
-    Widget cmp(String k, num b, num a, {int digits = 0, String suffix = ''}) =>
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 1.5),
-          child: Row(
+  Future<void> _openDetail(BuildContext context, TradeDrag d) =>
+      _showTradeDetail(
+        context,
+        c: c,
+        vendor: vendor,
+        drag: d,
+        execute: _execute,
+      );
+}
+
+class _Chest extends StatelessWidget {
+  const _Chest({
+    super.key,
+    required this.title,
+    required this.gridKey,
+    required this.acceptsFromShop,
+    required this.tiles,
+    required this.empty,
+    required this.onDrop,
+  });
+
+  final String title;
+  final Key gridKey;
+
+  /// true: rương này nhận ô kéo từ cửa hàng (mua); false: nhận ô kéo từ rương người chơi (bán).
+  final bool acceptsFromShop;
+  final List<Widget> tiles;
+  final String empty;
+  final void Function(TradeDrag) onDrop;
+
+  @override
+  Widget build(BuildContext context) {
+    return ItemDropZone<TradeDrag>(
+      accepts: (d) => d.fromShop == acceptsFromShop,
+      onDrop: onDrop,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Pal.line),
+        ),
+        padding: const EdgeInsets.all(4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: Pal.gold,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: tiles.isEmpty
+                  ? Center(
+                      child: Text(
+                        empty,
+                        style: const TextStyle(color: Pal.dim, fontSize: 11),
+                      ),
+                    )
+                  : GridView(
+                      key: gridKey,
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 96,
+                            mainAxisExtent: 100,
+                            mainAxisSpacing: 4,
+                            crossAxisSpacing: 4,
+                          ),
+                      children: tiles,
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Ô hàng của chợ/tiệm rèn: [ItemTile] chung + [DragItem] chung (chạm = chi tiết, kéo = giao dịch 1 đơn vị).
+Widget _tile({
+  required Key key,
+  required TradeDrag drag,
+  required Widget glyph,
+  required String name,
+  required int qty,
+  required int price,
+  required ItemTileState state,
+  required VoidCallback onTap,
+  String? note,
+}) => DragItem<TradeDrag>(
+  key: key,
+  data: drag,
+  onTap: onTap,
+  child: ItemTile(
+    qtyKey: ValueKey('qty-${(key as ValueKey).value}'),
+    glyph: glyph,
+    name: name,
+    qty: qty,
+    price: price,
+    state: state,
+    note: note,
+  ),
+);
+
+/// Popup chi tiết giao dịch: khối thông tin dùng chung + bộ chọn số lượng; xác nhận mới giao dịch.
+Future<void> _showTradeDetail(
+  BuildContext context, {
+  required GameController c,
+  required VendorDef vendor,
+  required TradeDrag drag,
+  required ActionResult Function(TradeDrag, int) execute,
+}) {
+  final s = c.state!;
+  final v = vendor;
+  final d = drag;
+  final buy = d.fromShop;
+  final isItem = d.item != null;
+  final int unitPrice;
+  final int unitWeight;
+  final int owned;
+  final int stock;
+  if (isItem) {
+    unitPrice = buy
+        ? GameRules.buyPrice(v, d.item!)
+        : GameRules.sellPrice(d.item!);
+    unitWeight = GameRules.itemWeightTenths(d.item!);
+    owned = s.inventory[d.item!] ?? 0;
+    stock = GameRules.peekStock(s, v).items[d.item!] ?? 0;
+  } else {
+    final r = d.res!;
+    unitPrice = buy
+        ? GameRules.resourceBuyPrice(v, r)
+        : GameRules.resourceSellPrice(r);
+    unitWeight = WeightEconomy.ofResource(r, 1);
+    owned = s.res[r] ?? 0;
+    stock = GameRules.peekStock(s, v).resources[r] ?? 0;
+  }
+  final weightRoom = unitWeight == 0
+      ? 999
+      : max(
+          0,
+          (GameRules.inventoryCapacityTenths(s) -
+                  GameRules.inventoryWeightTenths(s)) ~/
+              unitWeight,
+        );
+  final affordable = GameRules.spendableCoins(s) ~/ max(1, unitPrice);
+  final maxQty = buy ? [stock, affordable, weightRoom].reduce(min) : owned;
+  String? lock;
+  if (buy) {
+    if (stock <= 0) {
+      lock = 'Hết hàng';
+    } else if (affordable <= 0) {
+      lock = 'Thiếu vàng (cần $unitPrice)';
+    } else if (weightRoom <= 0) {
+      lock = 'Rương quá tải';
+    }
+  } else {
+    final sellable = isItem
+        ? v.kind == VendorKind.smithy
+        : v.kind == VendorKind.market && v.resources.containsKey(d.res);
+    if (!sellable) {
+      lock = '${v.name} không thu mua mặt hàng này';
+    } else if (owned <= 0) {
+      lock = 'Bạn không có món này';
+    }
+  }
+  final qty = ValueNotifier<int>(1);
+  final info = isItem
+      ? ItemInfoBlock.equipment(
+          d.item!,
+          price: unitPrice,
+          priceLabel: buy ? 'Giá mua' : 'Giá bán lại',
+          owned: owned,
+          stock: buy ? stock : null,
+        )
+      : ItemInfoBlock.resource(
+          d.res!,
+          price: unitPrice,
+          priceLabel: buy ? 'Giá mua' : 'Giá bán lại',
+          owned: owned,
+          stock: buy ? stock : null,
+        );
+  final extra = lock != null
+      ? Text(
+          lock,
+          key: const ValueKey('trade-popup-lock'),
+          style: const TextStyle(color: Pal.blood),
+        )
+      : ValueListenableBuilder<int>(
+          valueListenable: qty,
+          builder: (context, q, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: Text(k, style: const TextStyle(fontSize: 12))),
+              Row(
+                children: [
+                  IconButton.outlined(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Giảm',
+                    onPressed: q > 1 ? () => qty.value = q - 1 : null,
+                    icon: const Icon(Icons.remove),
+                  ),
+                  SizedBox(
+                    width: 48,
+                    child: Text(
+                      '$q',
+                      key: const ValueKey('trade-popup-qty'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton.outlined(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Tăng',
+                    onPressed: q < maxQty ? () => qty.value = q + 1 : null,
+                    icon: const Icon(Icons.add),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'tối đa $maxQty',
+                    style: const TextStyle(color: Pal.dim, fontSize: 11),
+                  ),
+                ],
+              ),
               Text(
-                '${b.toStringAsFixed(digits)}$suffix',
-                style: const TextStyle(color: Pal.dim),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
-                child: Icon(Icons.arrow_right_alt, size: 14, color: Pal.dim),
-              ),
-              Text(
-                '${a.toStringAsFixed(digits)}$suffix',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: deltaColor(b, a),
-                ),
-              ),
-              SizedBox(
-                width: 44,
-                child: Text(
-                  statDelta(b, a, digits: digits),
-                  textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 11, color: deltaColor(b, a)),
-                ),
+                '${buy ? 'Tổng chi' : 'Tổng thu'}: ${unitPrice * q} vàng',
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ],
           ),
         );
-
-    return Column(
-      children: [
-        Panel(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ItemGlyph(it.id, size: 52),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      it.name,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    Text(
-                      '${slotNames[it.slot]} • bậc ${it.tier}',
-                      style: const TextStyle(color: Pal.gold, fontSize: 12),
-                    ),
-                    Text(
-                      _line(it),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _buy
-                          ? 'Giá: $unit • Còn $stock • Bạn có $owned'
-                          : 'Giá mua lại: $unit • Bạn có $owned',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+  return showItemDetail(
+    context,
+    info: info,
+    extra: extra,
+    actions: [
+      if (lock == null)
+        ItemAction(
+          buy ? 'Mua' : 'Bán',
+          () => toast(context, execute(d, qty.value)),
+          key: const ValueKey('trade-popup-confirm'),
         ),
-        SizedBox(height: Dims(context).gap),
-        Panel(
-          title: 'So sánh khi trang bị',
-          child: soldier == null
-              ? Text(
-                  'Không còn binh sĩ.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    DropdownButton<int>(
-                      isExpanded: true,
-                      dropdownColor: Pal.panelHi,
-                      value: soldier.id,
-                      items: [
-                        for (final x in soldiers)
-                          DropdownMenuItem(
-                            value: x.id,
-                            child: Text(
-                              '${x.name} • ${roleNames[x.role]} c${x.level}${equipProblem(x, it) != null ? ' (không dùng được)' : ''}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                      ],
-                      onChanged: (x) => setState(() => _soldier = x),
-                    ),
-                    if (problem != null)
-                      Text(
-                        problem,
-                        style: const TextStyle(color: Pal.blood, fontSize: 12),
-                      )
-                    else ...[
-                      cmp('Máu', before!.maxHp, after!.maxHp),
-                      cmp('Công', before.attack, after.attack, digits: 1),
-                      cmp(
-                        'Giảm sát thương',
-                        before.reduction * 100,
-                        after.reduction * 100,
-                        suffix: '%',
-                      ),
-                      cmp(
-                        'Tốc độ',
-                        before.speed,
-                        after.speed,
-                        digits: 1,
-                        suffix: ' m/s',
-                      ),
-                      cmp(
-                        'Chính xác',
-                        before.accuracy * 100,
-                        after.accuracy * 100,
-                        suffix: '%',
-                      ),
-                    ],
-                  ],
-                ),
-        ),
-        SizedBox(height: Dims(context).gap),
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _qtyRow(maxQty, 'món'),
-              const SizedBox(height: 4),
-              Text(
-                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total vàng',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  GameButton(
-                    label: _buy ? 'Mua $qty' : 'Bán $qty',
-                    dense: true,
-                    icon: _buy ? Icons.shopping_bag : Icons.sell,
-                    lockedReason: lock,
-                    onPressed: () => _run(
-                      context,
-                      c,
-                      total,
-                      s,
-                      () => _buy
-                          ? c.buyFromVendor(v.id, it.id, qty)
-                          : c.sellToVendor(v.id, it.id, qty),
-                    ),
-                  ),
-                  if (_buy && soldier != null && problem == null && qty == 1)
-                    GameButton(
-                      label: 'Mua và trang bị cho ${soldier.name}',
-                      dense: true,
-                      icon: Icons.checkroom,
-                      lockedReason: lock,
-                      onPressed: () => _run(
-                        context,
-                        c,
-                        total,
-                        s,
-                        () => c.buyAndEquip(v.id, it.id, soldier.id),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _resourceDetail(
-    BuildContext context,
-    GameController c,
-    GameState s,
-    VendorDef v,
-    ShopStock st,
-    Res r,
-  ) {
-    final unit = _buy
-        ? GameRules.resourceBuyPrice(v, r)
-        : GameRules.resourceSellPrice(r);
-    final stock = st.resources[r] ?? 0;
-    final owned = s.res[r]! ~/ resourceLotSize;
-    final maxQty = _buy
-        ? [
-            stock,
-            GameRules.spendableCoins(s) ~/ unit,
-          ].reduce((a, b) => a < b ? a : b)
-        : owned;
-    final qty = _qty.clamp(1, maxQty < 1 ? 1 : maxQty);
-    final total = unit * qty;
-    String? lock;
-    if (_buy) {
-      if (stock <= 0) {
-        lock = 'Hết hàng';
-      } else if (!GameRules.canAfford(s, {Res.coins: unit})) {
-        lock = 'Thiếu ${unit - s.res[Res.coins]!} vàng';
-      }
-    } else if (owned <= 0) {
-      lock = 'Cần ít nhất $resourceLotSize ${resNames[r]!.toLowerCase()}';
-    }
-    return Column(
-      children: [
-        Panel(
-          child: Row(
-            children: [
-              Icon(resIcons[r], size: 40, color: Pal.gold),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${resNames[r]} (lô $resourceLotSize)',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    Text(
-                      _buy
-                          ? 'Giá mỗi lô: $unit • Còn $stock lô • Bạn có ${s.res[r]}'
-                          : 'Giá thu mua mỗi lô: $unit • Bạn có ${s.res[r]}',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: Dims(context).gap),
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _qtyRow(maxQty, 'lô'),
-              const SizedBox(height: 4),
-              Text(
-                '${_buy ? 'Tổng chi' : 'Tổng thu'}: $total vàng (${qty * resourceLotSize} ${resNames[r]!.toLowerCase()})',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 6),
-              GameButton(
-                label: _buy ? 'Mua $qty lô' : 'Bán $qty lô',
-                dense: true,
-                icon: _buy ? Icons.shopping_bag : Icons.sell,
-                lockedReason: lock,
-                onPressed: () => _run(
-                  context,
-                  c,
-                  total,
-                  s,
-                  () => _buy
-                      ? c.buyResourceLots(v.id, r, qty)
-                      : c.sellResourceLots(v.id, r, qty),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  static String _line(ItemDef it) => [
-    if (it.damage > 0) 'Công +${it.damage}',
-    if (it.defense > 0) 'Giáp +${it.defense}',
-    if (it.speed != 0) 'Tốc ${it.speed > 0 ? '+' : ''}${it.speed}',
-    for (final b in it.bonus.entries) '${statNames[b.key]} +${b.value}',
-    if (it.weaponType != null)
-      '${weaponProfiles[it.weaponType]!.name} • ${it.interval.toStringAsFixed(1)}s • ${it.range.toStringAsFixed(1)}m',
-    if (it.totalArmorPen > 0) 'Xuyên giáp ${it.totalArmorPen}',
-    if (it.reqLevel > 1) 'Cấp ${it.reqLevel}+',
-    if (it.reqStr > 0) 'SM ${it.reqStr}+',
-  ].join(' • ');
+    ],
+  );
 }

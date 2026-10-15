@@ -47,7 +47,7 @@ class _SquadScreenState extends State<SquadScreen> {
   Widget build(BuildContext context) {
     final c = ControllerScope.of(context);
     final s = c.state!;
-    final loc = locationById(widget.locationId)!;
+    final loc = GameRules.locationFor(s, widget.locationId)!;
     final d = Dims(context);
     _squad.removeWhere((id) => s.soldier(id)?.available != true);
     final members = [for (final id in _squad) s.soldier(id)!];

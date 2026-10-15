@@ -3,7 +3,6 @@ import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
-import 'package:app_rising_army/domain/stats.dart';
 import 'package:app_rising_army/presentation/screens/camp_hub.dart';
 import 'package:app_rising_army/presentation/widgets/common.dart';
 import 'package:flutter/material.dart';
@@ -81,17 +80,25 @@ void main() {
       expect(reload(s).facilities.any((x) => x.id == f.id), isFalse);
       expect(GameRules.removeFacility(s, f.id).ok, isFalse);
     });
-    test('Doanh trại không xóa được; Hòm đồ không xóa khi kho sẽ quá tải', () {
-      final s = camp();
-      final b = add(s, FacilityType.barracks, 0.8075, 0.695);
-      expect(GameRules.removeFacility(s, b.id).ok, isFalse);
-      final c = add(s, FacilityType.storageChest, 0.9, 0.4);
-      s.inventory['iron_spear'] = GameRules.inventoryCapacity(s) - 1;
-      expect(GameRules.removeFacility(s, c.id).ok, isFalse);
-      expect(s.facilities.contains(c), isTrue);
-      s.inventory['iron_spear'] = 1;
-      expect(GameRules.removeFacility(s, c.id).ok, isTrue);
-    });
+    test(
+      'Doanh trại không xóa được; Hòm đồ không xóa khi rương sẽ quá tải',
+      () {
+        final s = camp();
+        final b = add(s, FacilityType.barracks, 0.8075, 0.695);
+        expect(GameRules.removeFacility(s, b.id).ok, isFalse);
+        final c = add(s, FacilityType.storageChest, 0.9, 0.4);
+        // Làm rương nặng sát sức chứa: bỏ Hòm đồ sẽ khiến rương quá tải nên bị từ chối.
+        s.res.updateAll((_, _) => 0);
+        final room =
+            GameRules.inventoryCapacityTenths(s) -
+            GameRules.inventoryWeightTenths(s);
+        s.res[Res.stone] = s.res[Res.stone]! + room ~/ 10 - 1;
+        expect(GameRules.removeFacility(s, c.id).ok, isFalse);
+        expect(s.facilities.contains(c), isTrue);
+        s.res[Res.stone] = 0;
+        expect(GameRules.removeFacility(s, c.id).ok, isTrue);
+      },
+    );
   });
 
   group('nâng cấp slot', () {
@@ -173,7 +180,10 @@ void main() {
       expect(GameRules.reviveSoldier(s, so.id).ok, isTrue);
       expect(s.res[Res.coins], 5);
       expect(so.alive, isTrue);
-      expect(so.hp, so.maxHp);
+      // Hồi sinh chỉ trả lại sự sống: HP = 1 và bắt buộc chữa trị trước khi ra trận.
+      expect(so.hp, 1);
+      expect(so.needsTreatment, isTrue);
+      expect(so.available, isFalse);
       expect((so.weaponId, so.level, so.xp), ('iron_spear', 3, 12));
       expect(s.fallen, isEmpty);
       expect(s.soldiers.where((x) => x.id == so.id).length, 1);

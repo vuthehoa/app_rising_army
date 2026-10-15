@@ -39,17 +39,12 @@ void main() {
       }
     });
 
-    test('mọi nhóm có >= 2 món ở >= 2 phẩm cấp; mũ có nhiều phẩm cấp', () {
+    test('mọi nhóm có >= 2 món ở >= 2 phẩm cấp', () {
       for (final t in WeaponType.values) {
         final items = weapons.where((w) => w.weaponType == t).toList();
         expect(items.length, greaterThanOrEqualTo(2), reason: '$t');
         expect(items.map((i) => i.tier).toSet().length, greaterThan(1));
       }
-      final helmets = itemDefs.values.where((i) => i.slot == Slot.helmet);
-      expect(
-        helmets.map((i) => i.tier).toSet().length,
-        greaterThanOrEqualTo(5),
-      );
     });
 
     test('phẩm cấp, level yêu cầu và độ hiếm là các khái niệm độc lập', () {
@@ -172,14 +167,9 @@ void main() {
       );
     });
 
-    test('mũ cộng phòng thủ; xuyên giáp giảm hiệu quả giáp địch', () {
+    test('xuyên giáp giảm hiệu quả giáp địch', () {
       final s = GameRules.newGame(seed: 1);
       final so = mk(s)..level = 6;
-      final base = deriveStats(so).defense;
-      expect(
-        deriveStats(so, override: {Slot.helmet: 'steel_helm'}).defense,
-        base + 3,
-      );
       final d = deriveStats(so, override: {Slot.armor: 'chain_mail'});
       expect(d.reductionVs(5), lessThan(d.reductionVs(0)));
       expect(d.reductionVs(1000), 0);
@@ -280,7 +270,8 @@ void main() {
           (f) => f.type == FacilityType.meleeYard,
         );
         final so = s.roster.firstWhere((x) => x.role == Role.spearman)
-          ..weaponId = 'short_sword';
+          ..weaponId = 'short_sword'
+          ..level = 6; // trần chỉ số cao để lính không rời bãi vì đã đạt giới hạn huấn luyện
         so.stats[Stat.str] = 6;
         GameRules.assignToFacility(s, so.id, melee.id);
         GameRules.tickDay(s);
@@ -288,6 +279,11 @@ void main() {
         // Luyện nhiều ngày: không vượt trần huấn luyện.
         for (var i = 0; i < 80; i++) {
           s.res.updateAll((_, _) => 9999);
+          // Tập liên tục làm tụt Thể lực/Tinh thần (không còn tự hồi ngoài công trình): coi như được nghỉ đủ để
+          // bài kiểm tra chỉ xét trần huấn luyện thành thạo.
+          so
+            ..energy = energyCap(so)
+            ..morale = moraleCap(so);
           GameRules.tickDay(s);
           if (s.gameOver) break;
         }
@@ -329,9 +325,18 @@ void main() {
         [unitFrom(foe, player: false, at: const Pos(14, 10))],
         11,
       );
-      final xpA = a.xp;
+      final xp0 = {a.id: a.xp, b.id: b.xp};
+      final lv0 = {a.id: a.level, b.id: b.level};
       GameRules.applyBattle(s, [a, b], rep);
-      expect(a.xp, greaterThan(xpA));
+      // Hợp đồng XP mới (thay cho "người đánh luôn có XP"): có XP khi và chỉ khi gây sát thương hợp lệ.
+      for (final so in [a, b]) {
+        final dealt = rep.outcomes[so.id]!.dealt.values.fold(
+          0,
+          (x, y) => x + y,
+        );
+        expect(so.level, lv0[so.id], reason: 'trận nhỏ không đủ lên cấp');
+        expect(so.xp > xp0[so.id]!, dealt > 0, reason: so.name);
+      }
       expect(
         a.mastery[WeaponType.sword],
         greaterThanOrEqualTo(masteryBattleBase),
@@ -470,68 +475,60 @@ void main() {
               a + Slot.values.where((sl) => so.equipped(sl) != null).length,
         );
 
-    test(
-      'trang bị / đổi / tháo mũ và vũ khí không làm mất hay nhân đôi vật phẩm',
-      () {
-        final s = GameRules.newGame(seed: 2);
-        final so = s.roster.first..level = 6;
-        so.stats[Stat.str] = 16;
-        s.inventory.addAll({
-          'iron_helm': 1,
-          'steel_helm': 1,
-          'dagger': 1,
-          'battle_axe': 1,
-        });
-        final before = total(s);
-        expect(GameRules.equip(s, so.id, 'iron_helm').ok, isTrue);
-        expect(GameRules.equip(s, so.id, 'steel_helm').ok, isTrue);
-        expect(so.helmetId, 'steel_helm');
-        expect(s.inventory['iron_helm'], 1);
-        expect(
-          GameRules.equip(s, so.id, 'steel_helm').ok,
-          isFalse,
-          reason: 'hết trong kho',
-        );
-        expect(GameRules.equip(s, so.id, 'battle_axe').ok, isTrue);
-        expect(GameRules.equip(s, so.id, 'dagger').ok, isTrue);
-        expect(GameRules.unequip(s, so.id, Slot.helmet).ok, isTrue);
-        expect(GameRules.unequip(s, so.id, Slot.helmet).ok, isFalse);
-        expect(total(s), before);
-        expect(s.inventory.values.every((v) => v >= 0), isTrue);
-      },
-    );
+    test('trang bị / đổi / tháo giáp và vũ khí không làm mất hay nhân đôi vật phẩm', () {
+      final s = GameRules.newGame(seed: 2);
+      final so = s.roster.first..level = 6;
+      so.stats[Stat.str] = 16;
+      s.inventory.addAll({
+        'leather_armor': 1,
+        'chain_mail': 1,
+        'dagger': 1,
+        'battle_axe': 1,
+      });
+      final before = total(s);
+      expect(GameRules.equip(s, so.id, 'leather_armor').ok, isTrue);
+      expect(GameRules.equip(s, so.id, 'chain_mail').ok, isTrue);
+      expect(so.armorId, 'chain_mail');
+      expect(s.inventory['leather_armor'], 1);
+      expect(
+        GameRules.equip(s, so.id, 'chain_mail').ok,
+        isFalse,
+        reason: 'hết trong kho',
+      );
+      expect(GameRules.equip(s, so.id, 'battle_axe').ok, isTrue);
+      expect(GameRules.equip(s, so.id, 'dagger').ok, isTrue);
+      expect(GameRules.unequip(s, so.id, Slot.armor).ok, isTrue);
+      expect(GameRules.unequip(s, so.id, Slot.armor).ok, isFalse);
+      expect(total(s), before);
+      expect(s.inventory.values.every((v) => v >= 0), isTrue);
+    });
 
     test('so sánh trước/sau bằng override không đổi binh sĩ', () {
       final s = GameRules.newGame(seed: 2);
       final so = s.roster.first..level = 6;
       final json = jsonEncode(so.toJson());
-      final after = deriveStats(so, override: {Slot.helmet: 'steel_helm'});
+      final after = deriveStats(so, override: {Slot.armor: 'chain_mail'});
       expect(after.defense, greaterThan(deriveStats(so).defense));
       expect(jsonEncode(so.toJson()), json);
     });
 
-    test('Lò rèn bán nhiều nhóm vũ khí và mũ nhưng không bán phẩm cấp 6', () {
+    test('Lò rèn bán nhiều nhóm vũ khí nhưng không bán phẩm cấp 6', () {
       final sold = <WeaponType>{};
-      var helmets = 0;
       for (final v in vendors.where((v) => v.kind == VendorKind.smithy)) {
         for (final id in v.items.keys) {
           final it = itemDefs[id]!;
           expect(it.grade, lessThan(6));
           if (it.weaponType != null) sold.add(it.weaponType!);
-          if (it.slot == Slot.helmet) helmets++;
         }
       }
       expect(sold, containsAll(WeaponType.values));
-      expect(helmets, greaterThan(0));
     });
   });
 
   group('Lưu / tải', () {
-    test('mastery, kỹ năng, tài năng, mũ được lưu và tải lại đúng', () {
+    test('mastery, kỹ năng, tài năng được lưu và tải lại đúng', () {
       final s = GameRules.newGame(seed: 4);
-      final so = s.roster.first
-        ..level = 12
-        ..helmetId = 'iron_helm';
+      final so = s.roster.first..level = 6;
       so.mastery[WeaponType.axe] = 120;
       so.mastery[WeaponType.bow] = 30;
       so.skills['keen_eye'] = 2;
@@ -543,7 +540,6 @@ void main() {
       expect(b.mastery, so.mastery);
       expect(b.skills, so.skills);
       expect(b.talents, so.talents);
-      expect(b.helmetId, 'iron_helm');
       expect(jsonEncode(back.toJson()), jsonEncode(s.toJson()));
     });
 
@@ -553,7 +549,7 @@ void main() {
         final s = GameRules.newGame(seed: 4);
         final j = jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>;
         for (final so in j['soldiers'] as List) {
-          for (final k in ['mastery', 'skills', 'talents', 'helmet']) {
+          for (final k in ['mastery', 'skills', 'talents']) {
             (so as Map).remove(k);
           }
         }

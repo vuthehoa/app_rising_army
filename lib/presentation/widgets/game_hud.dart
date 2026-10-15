@@ -10,6 +10,7 @@ import 'buildings/camp_scene/camp_ground_painter.dart';
 import 'common.dart';
 import 'flag/flag_view.dart';
 import 'game_menu.dart';
+import 'swipe_detector.dart';
 
 /// Thứ tự hiển thị 7 tài nguyên trên Resource HUD (id lưu trữ của Res).
 const hudResourceOrder = <Res>[
@@ -94,6 +95,10 @@ class HudInsets {
 
 /// Lớp HUD nổi: Top HUD + Resource HUD.
 /// Chỉ nút Menu nhận chạm; các vùng còn lại cho sự kiện chạm xuyên xuống bên dưới.
+///
+/// Vuốt TRÁI/PHẢI trên HUD bên trái, vuốt LÊN/XUỐNG trên HUD trên cùng để thu gọn/mở lại (độc lập nhau). Khi thu gọn
+/// còn một tay nắm đủ lớn để chạm mở lại. Nhận vuốt bằng [SwipeDetector] (không vào gesture arena) nên không ảnh hưởng
+/// kéo-thả, cuộn hay pinch; trạng thái nằm ở `GameController` (không tự mở lại khi dựng lại).
 class GameHudOverlay extends StatelessWidget {
   const GameHudOverlay({
     super.key,
@@ -108,6 +113,9 @@ class GameHudOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = ControllerScope.of(context);
+    final leftOut = c.hudLeftCollapsed, topOut = c.hudTopCollapsed;
+    const dur = Duration(milliseconds: 220);
     return Positioned.fill(
       child: Stack(
         children: [
@@ -115,21 +123,86 @@ class GameHudOverlay extends StatelessWidget {
             left: insets.resourceLeft,
             top: insets.resourceTop,
             bottom: insets.resourceBottom,
-            child: const IgnorePointer(child: ResourceHud()),
+            child: AnimatedSlide(
+              duration: dur,
+              curve: Curves.easeOutCubic,
+              offset: Offset(leftOut ? -1.3 : 0, 0),
+              child: AnimatedOpacity(
+                duration: dur,
+                opacity: leftOut ? 0 : 1,
+                child: IgnorePointer(
+                  ignoring: leftOut,
+                  child: SwipeDetector(
+                    key: const ValueKey('hud-left-swipe'),
+                    onSwipeLeft: () => c.setHudCollapsed(left: true),
+                    // Chỉ quan sát con trỏ: nội dung HUD vẫn "trong suốt" với bản đồ / danh sách phía dưới (như trước).
+                    child: const IgnorePointer(child: ResourceHud()),
+                  ),
+                ),
+              ),
+            ),
           ),
           Positioned(
             left: insets.topBarLeft,
             right: insets.topBarRight,
             top: insets.topBarTop,
             height: HudInsets.topBarHeight,
-            child: Align(
-              alignment: alignTopBar,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: topBarMaxWidth,
-                  maxHeight: HudInsets.topBarHeight,
+            child: AnimatedSlide(
+              duration: dur,
+              curve: Curves.easeOutCubic,
+              offset: Offset(0, topOut ? -1.4 : 0),
+              child: AnimatedOpacity(
+                duration: dur,
+                opacity: topOut ? 0 : 1,
+                child: IgnorePointer(
+                  ignoring: topOut,
+                  child: SwipeDetector(
+                    key: const ValueKey('hud-top-swipe'),
+                    onSwipeUp: () => c.setHudCollapsed(top: true),
+                    child: Align(
+                      alignment: alignTopBar,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: topBarMaxWidth,
+                          maxHeight: HudInsets.topBarHeight,
+                        ),
+                        child: const GameTopHud(),
+                      ),
+                    ),
+                  ),
                 ),
-                child: const GameTopHud(),
+              ),
+            ),
+          ),
+          // Tay nắm mở lại (chỉ nhận chạm khi HUD tương ứng đang thu gọn).
+          Positioned(
+            left: 0,
+            top: insets.resourceTop + 4,
+            child: _HudHandle(
+              key: const ValueKey('hud-left-handle'),
+              visible: leftOut,
+              icon: Icons.chevron_right,
+              width: 40,
+              height: 64,
+              onExpand: () => c.setHudCollapsed(left: false),
+              swipeRight: true,
+            ),
+          ),
+          Positioned(
+            left: insets.topBarLeft,
+            right: insets.topBarRight,
+            top: insets.topBarTop,
+            // Góc phải (chỗ nút Menu khi HUD mở): tránh vùng giữa phía trên nơi đặt nút debug.
+            child: Align(
+              alignment: Alignment.topRight,
+              child: _HudHandle(
+                key: const ValueKey('hud-top-handle'),
+                visible: topOut,
+                icon: Icons.expand_more,
+                width: 72,
+                height: 36,
+                onExpand: () => c.setHudCollapsed(top: false),
+                swipeDown: true,
               ),
             ),
           ),
@@ -138,6 +211,69 @@ class GameHudOverlay extends StatelessWidget {
     );
   }
 }
+
+/// Tay nắm mở lại HUD đã thu gọn: nút đủ lớn (≥ 36 px mỗi chiều), cũng nhận vuốt đúng hướng mở.
+class _HudHandle extends StatelessWidget {
+  const _HudHandle({
+    super.key,
+    required this.visible,
+    required this.icon,
+    required this.width,
+    required this.height,
+    required this.onExpand,
+    this.swipeRight = false,
+    this.swipeDown = false,
+  });
+
+  final bool visible;
+  final IconData icon;
+  final double width, height;
+  final VoidCallback onExpand;
+  final bool swipeRight, swipeDown;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 220),
+      opacity: visible ? 1 : 0,
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: SwipeDetector(
+          onSwipeRight: swipeRight ? onExpand : null,
+          onSwipeDown: swipeDown ? onExpand : null,
+          child: Material(
+            color: Pal.panel.withValues(alpha: 0.88),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: Pal.goldDim, width: 1.5),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onExpand,
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: Icon(icon, color: Pal.gold, size: 26),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const _willLabelStyle = TextStyle(
+  fontFamily: serif,
+  fontSize: 11,
+  fontWeight: FontWeight.w900,
+  color: Pal.text,
+  height: 1.1,
+  shadows: [
+    Shadow(color: Color(0xFF000000), blurRadius: 3),
+    Shadow(color: Color(0xFF000000), offset: Offset(0, 1)),
+  ],
+);
 
 /// Bố cục: cờ/quân số lớn sát trái — thanh Thánh ý 7 màu — khiên ngày và Menu sát phải.
 ///
@@ -176,7 +312,24 @@ class GameTopHud extends StatelessWidget {
                 height: 20,
                 child: CustomPaint(
                   painter: _SacredWillBarPainter(progress: progress),
-                  child: const SizedBox.expand(),
+                  // Điểm uy tín đọc được ngay trên thanh; FittedBox giữ chữ gọn trong mọi cỡ màn hình.
+                  child: Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Uy tín ', style: _willLabelStyle),
+                          Text(
+                            '${(progress * 100).round()}',
+                            key: const ValueKey('hud-king-satisfaction-value'),
+                            maxLines: 1,
+                            style: _willLabelStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),

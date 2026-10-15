@@ -1,7 +1,9 @@
+// LƯU Ý: công cụ này mô phỏng bộ nhiệm vụ cũ (trước vòng lặp săn vô hạn); dùng tool/balance_sim.dart cho cân bằng hiện tại.
 // Chạy: dart run tool/economy_sim.dart [thư_mục_ra]   (mặc định docs/qa/generated, tiền tố "econ_")
 // Mô phỏng kinh tế 60 ngày với 10 phong cách chơi x 20 seed xác định, dùng đúng GameRules.
 import 'dart:io';
 
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/battle.dart';
 import 'package:app_rising_army/domain/models.dart';
@@ -166,8 +168,9 @@ bool buildSome(Run r, FacilityType type, {int reserveCoins = 0}) {
   if (free.isEmpty || s.facilities.where((f) => f.type == type).length >= 2) {
     return false;
   }
-  final def = facilityDefs[type]!;
-  if (s.res[Res.coins]! - (def.cost[Res.coins] ?? 0) < reserveCoins) {
+  if (s.res[Res.coins]! -
+          (ConstructionEconomy.buildCost(type)[Res.coins] ?? 0) <
+      reserveCoins) {
     return false;
   }
   return GameRules.buildFacility(s, type, free.first).ok;
@@ -191,16 +194,15 @@ ItemDef? bestShopItem(GameState s, Soldier so, Slot slot, int budget) {
 }
 
 int _score(ItemDef it) =>
-    it.damage * 3 +
+    (it.damageAvg * 3).round() +
     it.defense * 3 +
-    it.speed * 2 +
-    it.bonus.values.fold(0, (a, b) => a + b) * 3;
+    it.traits.fold(0, (a, e) => a + e.value.round()) * 3;
 
 bool equip(Run r, {int reserve = 0, bool buy = true}) {
   final s = r.s;
   var did = false;
   for (final so in ready(s)) {
-    for (final slot in [Slot.weapon, Slot.armor, Slot.accessory]) {
+    for (final slot in [Slot.weapon, Slot.armor, Slot.shield]) {
       // Ưu tiên đồ trong kho.
       final fromInv = [
         for (final e in s.inventory.entries)
@@ -325,6 +327,8 @@ bool pursueMission(Run r, {double maxDanger = 0.8, int squadSize = 8}) {
     if (GameRules.missionReady(s, m)) continue;
     final rd = ready(s);
     switch (t.kind) {
+      case MissionKind.hunt:
+        continue; // mô phỏng cũ không xử lý nhiệm vụ săn (xem tool/balance_sim.dart)
       case MissionKind.clear:
         final loc = locationById(t.locId!)!;
         if (!s.discovered.contains(loc.id)) {
@@ -530,15 +534,15 @@ bool cityTrip(
           Res.wood => keepWood,
           _ => keepIron,
         };
-        final lots = (s.res[res]! - keep) ~/ resourceLotSize;
-        if (lots > 0 && v.resources.containsKey(res)) {
-          GameRules.sellResourceLots(s, v.id, res, lots.clamp(1, 99));
+        final units = s.res[res]! - keep;
+        if (units > 0 && v.resources.containsKey(res)) {
+          GameRules.sellResource(s, v.id, res, units.clamp(1, 999));
         }
       }
     }
     if (buy) {
       for (final so in ready(s)) {
-        for (final slot in [Slot.weapon, Slot.armor, Slot.accessory]) {
+        for (final slot in [Slot.weapon, Slot.armor, Slot.shield]) {
           final cur = so.equipped(slot);
           final curScore = cur == null ? -1 : _score(itemDefs[cur]!);
           ItemDef? best;

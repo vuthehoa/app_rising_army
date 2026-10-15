@@ -5,6 +5,7 @@ import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/camp_layout.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
+import 'package:app_rising_army/domain/stats.dart';
 import 'package:app_rising_army/presentation/screens/camp_hub.dart';
 import 'package:app_rising_army/presentation/widgets/art.dart';
 import 'package:app_rising_army/presentation/widgets/buildings/camp_scene/camp_ground_painter.dart';
@@ -257,14 +258,14 @@ void main() {
         }
         // Bốn chỉ số chiến đấu cùng một hàng.
         final row = find.byKey(const ValueKey('soldier-combat-row'));
-        for (final l in ['Trúng', 'Tốc độ', 'Thời gian', 'Tấn công']) {
+        for (final l in ['Trúng', 'Di chuyển', 'Thời gian', 'Sát thương']) {
           expect(
             find.descendant(of: row, matching: find.text(l)),
             findsOneWidget,
           );
         }
         final centers = [
-          for (final l in ['Trúng', 'Tốc độ', 'Thời gian', 'Tấn công'])
+          for (final l in ['Trúng', 'Di chuyển', 'Thời gian', 'Sát thương'])
             t
                 .getRect(find.descendant(of: row, matching: find.text(l)))
                 .center
@@ -280,6 +281,33 @@ void main() {
           lessThan(rowRect.height / 2),
           reason: 'cùng một hàng',
         );
+        // Cấp và EXP nằm ngay dưới chân nhân vật (cùng cột với hình), không nằm lẫn trong danh sách chỉ số.
+        final sprite = t.getRect(
+          find
+              .descendant(
+                of: find.byKey(const ValueKey('soldier-info-panel')),
+                matching: find.byType(SoldierSprite),
+              )
+              .first,
+        );
+        final level = t.getRect(find.byKey(const ValueKey('soldier-level')));
+        final exp = t.getRect(find.byKey(const ValueKey('soldier-exp-bar')));
+        expect(level.center.dy, greaterThan(sprite.center.dy));
+        expect(exp.top, greaterThan(sprite.center.dy));
+        expect(exp.center.dx, closeTo(sprite.center.dx, sprite.width));
+        // Bốn chỉ số gốc hiển thị là số nguyên.
+        final d = deriveStats(so);
+        for (final v in [d.core.str, d.core.dex, d.core.con, d.core.atk]) {
+          expect(find.text('$v'), findsWidgets);
+        }
+        for (final text in t.widgetList<Text>(find.byType(Text))) {
+          final data = text.data ?? '';
+          expect(
+            RegExp(r'^\d+\.\d+$').hasMatch(data),
+            isFalse,
+            reason: 'không hiển thị số thập phân trần: $data',
+          );
+        }
         // Hai panel gần bằng nhau.
         final l = t.getSize(find.byKey(const ValueKey('soldier-info-panel')));
         final r = t.getSize(
@@ -296,7 +324,7 @@ void main() {
         final before = jsonEncode(s.toJson());
         expect(
           t.widget<Text>(find.byKey(const ValueKey('inv-capacity'))).data,
-          '${GameRules.inventoryCount(s)} / ${GameRules.inventoryCapacity(s)} món',
+          '${GameRules.inventoryWeightKg(s)} / ${GameRules.inventoryCapacity(s)} kg',
         );
         for (var i = 0; i < 10; i++) {
           expect(find.byKey(ValueKey('inv-slot-$i')), findsOneWidget);
@@ -402,4 +430,4 @@ void main() {
   });
 }
 
-int xpLeft(Soldier so) => 20 * so.level - so.xp;
+int xpLeft(Soldier so) => xpForNext(so.level) - so.xp;

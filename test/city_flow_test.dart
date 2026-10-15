@@ -2,9 +2,11 @@ import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
+import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/domain/world_data.dart';
 import 'package:app_rising_army/domain/world_map.dart';
 import 'package:app_rising_army/main.dart';
+import 'package:app_rising_army/presentation/screens/vendor_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -56,35 +58,61 @@ Future<void> toCity(WidgetTester tester, GameController c) async {
     await tester.pump(const Duration(milliseconds: 50));
   }
   await tester.pumpAndSettle(); // tới tâm thị trấn thì tự vào thành
+  // Tồn kho hằng ngày sinh theo seed (đổi mỗi khi qua ngày trên đường đi); cố định món cần dùng để luồng UI không
+  // phụ thuộc vào số ngẫu nhiên của ván.
+  // Đặt lên đầu danh sách để luôn nằm trong vùng nhìn thấy của ListView (dựng lười).
+  final items = GameRules.stockOf(c.state!, vendorById('g_smith')!).items;
+  final rest = Map.of(items)..remove('leather_armor');
+  items
+    ..clear()
+    ..['leather_armor'] = 3
+    ..addAll(rest);
+}
+
+/// Mở một gian trong cảnh thành phố (tiệm rèn / quán rượu / chợ) qua nhãn ngữ nghĩa của ô chạm.
+Future<void> openStall(WidgetTester tester, String labelPrefix) async {
+  final f = find.byWidgetPredicate(
+    (w) => w is Semantics && (w.properties.label ?? '').startsWith(labelPrefix),
+  );
+  expect(f, findsWidgets, reason: 'không thấy gian "$labelPrefix"');
+  await tester.tap(f.first);
+  await tester.pumpAndSettle();
 }
 
 void main() {
   testWidgets(
-    'luồng: bản đồ → hành quân → thành phố → người bán → mua & trang bị → so sánh → về bản đồ',
+    'luồng: bản đồ → hành quân → thành phố → người bán → chạm xem chi tiết → mua trong popup → về bản đồ',
     (tester) async {
       final c = await boot(tester, const Size(932, 430));
       await toCity(tester, c);
       expect(c.state!.visiting, 'g_town');
-      expect(find.text('Thị trấn Đá Xám'), findsWidgets);
+      expect(find.text('THỊ TRẤN ĐÁ XÁM'), findsWidgets);
 
-      await tapText(tester, 'Thợ may giáp');
-      expect(find.text('Giáp da'), findsWidgets);
-      await tapText(tester, 'Giáp da');
-      expect(find.text('SO SÁNH KHI TRANG BỊ'), findsOneWidget);
-      expect(find.textContaining('Máu'), findsWidgets);
+      await openStall(tester, 'Tiệm rèn');
+      expect(
+        find.byKey(const ValueKey('shop-item-leather_armor')),
+        findsOneWidget,
+      );
+      // Chạm chỉ mở popup chi tiết, chưa giao dịch.
+      await tester.tap(find.byKey(const ValueKey('shop-item-leather_armor')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('item-detail')), findsOneWidget);
+      expect(c.state!.tradeCount, 0);
 
       final coins = c.state!.res[Res.coins]!;
-      final so = c.state!.roster.firstWhere((x) => x.role == Role.spearman);
-      await tapText(tester, 'Mua và trang bị cho ${so.name}');
-      expect(c.state!.soldier(so.id)!.armorId, 'leather_armor');
+      await tester.tap(find.byKey(const ValueKey('trade-popup-confirm')));
+      await tester.pumpAndSettle();
+      expect(c.state!.inventory['leather_armor'], greaterThan(0));
       expect(c.state!.res[Res.coins]!, lessThan(coins));
       expect(c.state!.tradeCount, 1);
 
       // Thoát: về thành phố rồi về bản đồ.
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tapText(tester, 'Rời thành phố, về bản đồ');
-      expect(c.state!.visiting, isNull);
+      await tapText(tester, 'Rời');
+      // "Rời" đóng màn thành phố; `visiting` chỉ xóa khi nhân vật thật sự rời tâm thị trấn (application/hero_travel.dart).
+      expect(find.text('THỊ TRẤN ĐÁ XÁM'), findsNothing);
+      expect(c.state!.visiting, 'g_town');
       expect(
         find.byKey(const ValueKey('map-surface')),
         findsOneWidget,
@@ -97,12 +125,18 @@ void main() {
     (tester) async {
       final c = await boot(tester, const Size(932, 430));
       await toCity(tester, c);
-      await tapText(tester, 'Chợ vật tư');
-      await tapText(tester, 'Bán');
-      expect(
-        find.text('Không có gì để bán ở đây.'),
-        findsNothing,
-      ); // có gỗ/sắt/lương thực để bán
+      await openStall(tester, 'Chợ');
+      // Rương người chơi hiện sẵn tài nguyên có thể bán (không cần chuyển tab).
+      expect(find.byKey(const ValueKey('chest-res-wood')), findsOneWidget);
+      final wood = c.state!.res[Res.wood]!;
+      await tester.drag(
+        find.byKey(const ValueKey('chest-res-wood')),
+        const Offset(-300, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(c.state!.res[Res.wood], wood - 1);
+      expect(c.state!.tradeCount, 1);
+      c.state!.tradeCount = 0;
       c.state!.visiting = 'g_town';
       expect(c.state!.tradeCount, 0);
     },
@@ -114,11 +148,13 @@ void main() {
       final store = MemoryStore();
       final c1 = await boot(tester, const Size(932, 430), store: store);
       await toCity(tester, c1);
-      await tapText(tester, 'Thợ rèn Đá Xám');
-      await tapText(tester, 'Giáo gỗ');
-      await tapText(tester, 'Mua 1');
+      await openStall(tester, 'Tiệm rèn');
+      await tester.tap(find.byKey(const ValueKey('shop-item-leather_armor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('trade-popup-confirm')));
+      await tester.pumpAndSettle();
       final coins = c1.state!.res[Res.coins]!;
-      final spears = c1.state!.inventory['wooden_spear'];
+      final spears = c1.state!.inventory['leather_armor'];
       await tester.pumpAndSettle();
 
       // Mở lại ứng dụng bằng bộ điều khiển mới trên cùng kho lưu.
@@ -128,14 +164,14 @@ void main() {
       await tester.pumpWidget(const SizedBox()); // đóng ứng dụng
       await tester.pumpWidget(RisingArmyApp(controller: c2));
       await tester.pumpAndSettle();
-      await tapText(tester, 'Tiếp tục');
+      await tapText(tester, 'TIẾP TỤC');
       expect(c2.state!.res[Res.coins], coins);
-      expect(c2.state!.inventory['wooden_spear'], spears);
+      expect(c2.state!.inventory['leather_armor'], spears);
       expect(c2.state!.visiting, 'g_town');
       expect(c2.state!.tradeCount, 1);
       expect(
-        c2.state!.shops['g_smith']!.items['wooden_spear'],
-        vendorById('g_smith')!.items['wooden_spear']! - 1,
+        c2.state!.shops['g_smith']!.items['leather_armor'],
+        3 - 1, // tồn kho được đặt là 3 trong toCity; mua 1
       );
     },
   );
@@ -148,12 +184,23 @@ void main() {
         c.state!.inventory['padded_armor'] = 3;
         await toCity(tester, c);
         expect(tester.takeException(), isNull);
-        for (final stall in ['Thợ rèn Đá Xám', 'Thợ may giáp', 'Chợ vật tư']) {
-          await tapText(tester, stall);
+        for (final stall in ['Tiệm rèn', 'Chợ']) {
+          await openStall(tester, stall);
           expect(tester.takeException(), isNull, reason: stall);
-          // Chọn mặt hàng đầu tiên rồi chuyển qua tab Bán.
-          await tapText(tester, 'Bán');
-          await tapText(tester, 'Mua');
+          // Mở rồi đóng popup chi tiết của ô đầu tiên ở mỗi rương.
+          for (final grid in ['shop-grid', 'chest-grid']) {
+            final tile = find.descendant(
+              of: find.byKey(ValueKey(grid)),
+              matching: find.byType(Draggable<TradeDrag>),
+            );
+            if (tile.evaluate().isEmpty) continue;
+            await tester.tap(tile.first);
+            await tester.pumpAndSettle();
+            expect(find.byKey(const ValueKey('item-detail')), findsOneWidget);
+            await tester.tap(find.byKey(const ValueKey('item-detail-close')));
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull, reason: '$stall/$grid');
+          }
           await tester.pageBack();
           await tester.pumpAndSettle();
         }

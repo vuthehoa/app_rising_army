@@ -58,6 +58,8 @@ const facilityEffects = <FacilityType, List<BuildingEffect>>{
     BuildingEffect(_energy, _upUp),
     BuildingEffect(_morale, _up),
   ],
+  // Bãi đá: tăng TINH THẦN (không huấn luyện Thể hình). Áp mỗi ngày cho lính được gán vào bãi, theo `moralePerDay`.
+  FacilityType.enduranceYard: [BuildingEffect(_morale, _upUp)],
 };
 
 /// Bếp lửa giữa trại chỉ là hình trang trí (không phải công trình xây/gán được) nên chưa có cơ chế gameplay
@@ -68,10 +70,8 @@ List<BuildingEffect> effectsOf(FacilityType t) =>
     facilityEffects[t] ?? const [];
 
 /// Chỉ ảnh hưởng HIỂN THỊ (không đổi gameplay, vốn đọc [effectsOf]): công trình có danh sách hiển thị riêng.
-/// Bãi đá (`enduranceYard`) hiện đốm lửa `++`.
-const displayEffectOverrides = <FacilityType, List<BuildingEffect>>{
-  FacilityType.enduranceYard: [BuildingEffect(_morale, _upUp)],
-};
+/// Hiện không công trình nào cần: mọi biểu tượng hiển thị đều là hiệu ứng thật.
+const displayEffectOverrides = <FacilityType, List<BuildingEffect>>{};
 
 /// Chỉ số bị ẩn khỏi hàng buff/debuff hiển thị của công trình: Bãi bắn cung không hiện icon cánh tay (sức mạnh).
 const hiddenDisplayStats = <FacilityType, Set<EffectStat>>{
@@ -103,10 +103,10 @@ const hpHealPerDay = <EffectLevel, int>{
 
 /// Thay đổi điểm mỗi ngày của năng lượng.
 const pointsPerDay = <EffectLevel, int>{
-  EffectLevel.strongUp: 10,
-  EffectLevel.up: 5,
+  EffectLevel.strongUp: 12,
+  EffectLevel.up: 6,
   EffectLevel.down: -3,
-  EffectLevel.strongDown: -6,
+  EffectLevel.strongDown: -5,
 };
 
 /// Thay đổi tinh thần mỗi ngày, CỘNG THÊM lên cơ chế trôi về mức cân bằng của Quán rượu (±2/ngày) nên giữ
@@ -114,8 +114,8 @@ const pointsPerDay = <EffectLevel, int>{
 const moralePerDay = <EffectLevel, int>{
   EffectLevel.strongUp: 3,
   EffectLevel.up: 1,
-  EffectLevel.down: -3,
-  EffectLevel.strongDown: -6,
+  EffectLevel.down: -2,
+  EffectLevel.strongDown: -4,
 };
 
 /// Hệ số tạm thời lên sức mạnh/tốc độ/thể lực KHI ĐANG tập luyện (`+` = 25% theo thiết kế). Chỉ áp dụng vào
@@ -135,4 +135,41 @@ double trainingPct(FacilityType? t, EffectStat stat) {
     if (e.stat == stat) sum += percentPerLevel[e.level]!;
   }
   return sum;
+}
+
+// ---- Huấn luyện: tiến độ chỉ số mỗi ngày theo cấp công trình ----
+
+/// Tiến độ huấn luyện mỗi ngày (phần trăm của 1 điểm chỉ số) cho chỉ số `++` / `+`, theo cấp công trình
+/// (`Facility.level`: 1 = cơ bản, 2 = đã nâng cấp). Số nguyên để tiến độ lẻ không bị làm tròn mất.
+/// Cấp 1: `++` 25%/ngày (đủ 1 điểm sau 4 ngày), `+` 15%/ngày (7 ngày). Cấp 2: `++` 35% (3 ngày), `+` 22% (5 ngày).
+/// Game chỉ có hai cấp công trình, nên không có cấp cao hơn để mở rộng đường cong.
+const trainingPercentPerDay = <int, Map<EffectLevel, int>>{
+  1: {EffectLevel.strongUp: 25, EffectLevel.up: 15},
+  2: {EffectLevel.strongUp: 35, EffectLevel.up: 22},
+};
+
+/// Hiệu ứng chỉ số của công trình nào thì huấn luyện chỉ số cơ bản đó.
+const _trainedBy = <EffectStat, Stat>{
+  EffectStat.strength: Stat.str,
+  EffectStat.speed: Stat.dex,
+  EffectStat.stamina: Stat.con,
+};
+
+/// Công trình huấn luyện ngoài [facilityEffects]: hiện không còn (Bãi đá tăng Tinh thần, không rèn Thể hình).
+const _trainingFallback = <FacilityType, Map<Stat, EffectLevel>>{};
+
+/// Chỉ số cơ bản mà [t] huấn luyện và cấp `++`/`+` của từng chỉ số. `-`/`--` không phải huấn luyện.
+Map<Stat, EffectLevel> trainedStats(FacilityType t) {
+  final out = <Stat, EffectLevel>{};
+  for (final e in effectsOf(t)) {
+    final st = _trainedBy[e.stat];
+    if (st != null && e.isBuff) out[st] = e.level;
+  }
+  return out.isEmpty ? (_trainingFallback[t] ?? const {}) : out;
+}
+
+/// Tiến độ huấn luyện (phần trăm) mỗi ngày của từng chỉ số tại [t] ở cấp [level].
+Map<Stat, int> trainingRates(FacilityType t, int level) {
+  final table = trainingPercentPerDay[level.clamp(1, 2)]!;
+  return {for (final e in trainedStats(t).entries) e.key: table[e.value]!};
 }

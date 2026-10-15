@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/dev_mode.dart';
 import 'common.dart';
 
-/// Nút bật/tắt Develop Mode, phủ lên mọi màn hình (đặt ở MaterialApp.builder, ngoài MainMenuScreen).
+/// Nút bật/tắt Develop Mode, phủ lên mọi màn hình (giữa mép trên) (đặt ở MaterialApp.builder, ngoài MainMenuScreen).
 /// Không được dựng ở bản release ([DevMode.available] là false).
 class DevModeToggle extends StatelessWidget {
   const DevModeToggle({super.key});
@@ -15,11 +15,14 @@ class DevModeToggle extends StatelessWidget {
     final c = ControllerScope.of(context);
     final on = c.devMode;
 
+    // Đặt ở giữa mép TRÊN: góc dưới-trái từng che nút hành động đầu tiên của Deploy ("Deploy Units") và các thanh
+    // nút dưới ở màn hẹp (667×375, 844×390), làm cú chạm vào nút bị nút này nuốt.
     return Align(
-      alignment: Alignment.bottomLeft,
+      alignment: Alignment.topCenter,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(4),
+          // Dải mép trên (≈ 36px đầu) trống ở mọi màn hình: hai nút debug đứng cạnh nhau hai bên tâm, không xuống hàng dưới.
+          padding: const EdgeInsets.fromLTRB(4, 4, 104, 4),
           child: Material(
             key: const ValueKey('dev-mode-toggle'),
             color: on

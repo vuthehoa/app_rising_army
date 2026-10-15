@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../application/game_controller.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
+import '../../domain/economy.dart';
 import '../../domain/models.dart';
 import '../../domain/rules.dart';
 
@@ -431,10 +432,10 @@ IconData roleIcon(Role r) => switch (r) {
 };
 
 String daysLeftText(GameState s, Mission m) {
-  final left = m.deadline - s.day;
-  return left < 0
-      ? 'quá hạn'
-      : (left == 0 ? 'hết hạn hôm nay' : 'còn $left ngày');
+  final left = GameRules.remainingDays(s, m);
+  return left <= 0
+      ? 'đã hết hạn'
+      : (left == 1 ? 'còn 1 ngày — sắp hết hạn' : 'còn $left ngày');
 }
 
 String missionRequirement(MissionTemplate t) => switch (t.kind) {
@@ -445,9 +446,9 @@ String missionRequirement(MissionTemplate t) => switch (t.kind) {
   MissionKind.explore =>
     'Khám phá ${t.amount} tàn tích ở ${regionById(t.regionId!).name}',
   MissionKind.visit => 'Đến ${locationById(t.locId!)!.name}',
+  MissionKind.hunt => 'Tiêu diệt đội địch tại điểm đánh dấu trên bản đồ',
   MissionKind.gearCount =>
     '${t.amount} binh sĩ mặc giáp có chỉ số ≥ ${t.armorDef}',
 };
 
-String missionRewardText(MissionTemplate t) =>
-    '${GameRules.describeCost(t.rewardRes)}${t.rewardItem != null ? ' + ${itemDefs[t.rewardItem]!.name}' : ''} • hài lòng +${t.rewardSat}';
+String missionRewardText(MissionTemplate t) => QuestEconomy.describe(t);

@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'dart:math' as math;
 
+import 'package:app_rising_army/presentation/widgets/camp/soldier_info_dialog.dart';
+import 'package:app_rising_army/presentation/widgets/common.dart';
 import 'package:flutter/material.dart';
 
 import '../../../application/game_controller.dart';
@@ -110,6 +112,16 @@ class CampSoldiersLayer extends StatelessWidget {
   final GameController controller;
   final CampMetrics metrics;
 
+  /// Tối đa số lính trên một hàng dưới công trình (Doanh trại có thể chứa nhiều hơn nên xếp nhiều hàng).
+  static const _perRow = 6;
+
+  /// Số lính trên hàng chứa lính thứ [i] khi có [n] lính.
+  static int _rowSize(int n, int i) {
+    final row = i ~/ _perRow;
+    final left = n - row * _perRow;
+    return left < _perRow ? left : _perRow;
+  }
+
   /// Vị trí nghỉ của binh sĩ không được gán: xác định theo (id, ngày) nên đổi mỗi ngày, di chuyển mượt bằng AnimatedPositioned.
   static Offset idleSpot(int id, int day, Size size) {
     final r = Random(id * 7919 + day * 104729);
@@ -140,9 +152,14 @@ class CampSoldiersLayer extends StatelessWidget {
                 // Lính đứng thành hàng ngay dưới công trình, cách nhau theo kích thước lính.
                 left:
                     f.x * m.size.width +
-                    (i - (f.assigned.length - 1) / 2) * m.sprite * 0.85 -
+                    (i % _perRow - (_rowSize(f.assigned.length, i) - 1) / 2) *
+                        m.sprite *
+                        0.85 -
                     m.sprite / 2,
-                top: f.y * m.size.height + m.facilityH * 0.32,
+                top:
+                    f.y * m.size.height +
+                    m.facilityH * 0.32 +
+                    (i ~/ _perRow) * m.sprite * 0.7,
                 child: CampSoldierToken(
                   soldier: s.soldier(f.assigned[i])!,
                   size: m.sprite,
@@ -224,27 +241,39 @@ class CampPlacementHint extends StatelessWidget {
 }
 
 /// HUD của trại: số quân, kho đồ, nhật ký nhiệm vụ.
+
 class CampHud extends StatelessWidget {
-  const CampHud({super.key, required this.state});
+  const CampHud({super.key, required this.state, required this.soldier});
 
   final GameState state;
+  final Soldier soldier;
 
   @override
   Widget build(BuildContext context) {
     final s = state;
+
     return Stack(
       children: [
-        // Quân số hiển thị trên lá cờ ở Top HUD (GameTopHud) nên không lặp lại ở đây.
+        // Rương đồ: nhấn để mở giao diện Hòm đồ.
         Positioned(
           left: 8,
           bottom: 8,
           child: CampBadge(
             icon: Icons.inventory_2,
             text:
-                '${GameRules.inventoryCount(s)}/${GameRules.inventoryCapacity(s)}',
-            tip: 'Kho đồ (stash)',
+                '${GameRules.inventoryWeightKg(s)}/${GameRules.inventoryCapacity(s)}',
+            tip: 'Rương: trọng lượng đang mang / sức chứa (kg)',
+            warn:
+                GameRules.inventoryWeightTenths(s) >=
+                GameRules.inventoryCapacityTenths(s),
+            onTap: () {
+              final controller = ControllerScope.of(context);
+              showSoldierInfoDialog(context, controller, soldier.id);
+            },
           ),
         ),
+
+        // Nhật ký nhiệm vụ: giữ nguyên hành vi.
         Positioned(
           right: 8,
           bottom: 8,
@@ -286,7 +315,7 @@ class CampActionBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 58,
+          height: 68,
           child: Stack(
             alignment: Alignment.bottomCenter,
             clipBehavior: Clip.none,
@@ -297,7 +326,7 @@ class CampActionBar extends StatelessWidget {
                 right: 0,
                 bottom: 0,
                 child: Container(
-                  height: 42,
+                  height: 50,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Row(
                     children: [
@@ -316,7 +345,7 @@ class CampActionBar extends StatelessWidget {
                       ),
 
                       // Khoảng cách hai bên nút Qua Ngày bằng nhau.
-                      const SizedBox(width: 48),
+                      const SizedBox(width: 64),
 
                       // Bản đồ: đối xứng với nút Xây.
                       Expanded(
@@ -340,19 +369,20 @@ class CampActionBar extends StatelessWidget {
               Positioned(
                 bottom: 0,
                 child: GestureDetector(
+                  key: const ValueKey('camp-next-day'),
                   onTap: onNextDay,
                   behavior: HitTestBehavior.opaque,
                   child: SizedBox(
-                    width: 44,
-                    height: 44,
+                    width: 56,
+                    height: 56,
                     child: Stack(
                       alignment: Alignment.center,
                       clipBehavior: Clip.none,
                       children: [
                         // Huy hiệu tròn 44 x 44.
                         Container(
-                          width: 44,
-                          height: 44,
+                          width: 56,
+                          height: 56,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient: const LinearGradient(
@@ -376,7 +406,7 @@ class CampActionBar extends StatelessWidget {
                           child: const Center(
                             child: Icon(
                               Icons.campaign_rounded,
-                              size: 25,
+                              size: 30,
                               color: Color(0xFF8C6324),
                             ),
                           ),
@@ -386,7 +416,7 @@ class CampActionBar extends StatelessWidget {
                         Positioned(
                           top: -3,
                           child: Container(
-                            width: 42,
+                            width: 54,
                             alignment: Alignment.center,
                             padding: const EdgeInsets.symmetric(
                               horizontal: 1,
@@ -405,7 +435,7 @@ class CampActionBar extends StatelessWidget {
                                 softWrap: false,
                                 style: TextStyle(
                                   color: Color(0xFF493321),
-                                  fontSize: 8,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w900,
                                   height: 1,
                                 ),
@@ -467,19 +497,20 @@ class _CompactCampActionButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+            // Vùng chạm tối thiểu 44 pt chiều cao.
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 16, color: const Color(0xFF65451F)),
-                const SizedBox(width: 4),
+                Icon(icon, size: 18, color: const Color(0xFF65451F)),
+                const SizedBox(width: 5),
                 Text(
                   label,
                   maxLines: 1,
                   softWrap: false,
                   style: const TextStyle(
                     color: _darkInk,
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: FontWeight.w800,
                     height: 1,
                   ),

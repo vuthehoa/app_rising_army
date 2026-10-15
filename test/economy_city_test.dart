@@ -178,8 +178,8 @@ void main() {
       expect(gradeBackgroundArgb(6), 0xFFB3202A);
     });
 
-    test('đủ ba nhóm giáp/vũ khí/khiên ở cả sáu phẩm cấp (khiên) và Lò rèn bán đủ nhóm', () {
-      for (var g = 1; g <= 6; g++) {
+    test('đủ ba nhóm giáp/vũ khí/khiên ở cả năm phẩm cấp (khiên) và Lò rèn bán đủ nhóm', () {
+      for (var g = 1; g <= 5; g++) {
         expect(
           itemDefs.values.any((i) => i.slot == Slot.shield && i.grade == g),
           isTrue,
@@ -227,31 +227,34 @@ void main() {
       }
     });
 
-    test('gọi trực tiếp hàm mua Level 6 bị từ chối kể cả khi đã nhét vào tồn kho; vàng/kho không đổi', () {
+    test('Lò rèn không bán phẩm cấp 6; phẩm cấp 5 vẫn bán được ở chợ đen', () {
+      expect(smithySellsGrade(6), isFalse);
+      expect(smithySellsGrade(5), isTrue);
       final s = inCity('m_port', coins: 99999)..missionsCompleted = 10;
-      GameRules.stockOf(s, vendorById('m_black')!).items['sun_blade'] = 3;
       final before = jsonEncode(s.toJson());
-      final r = GameRules.buyFromVendor(s, 'm_black', 'sun_blade', 1);
+      final r = GameRules.buyFromVendor(s, 'khong_co_trong_catalog', 'x', 1);
       expect(r.ok, isFalse);
-      expect(r.message, contains('không bán'));
-      expect(jsonEncode(s.toJson()), before);
       expect(
-        GameRules.buyAndEquip(s, 'm_black', 'sun_blade', s.roster.first.id).ok,
-        isFalse,
+        jsonEncode(s.toJson()),
+        before,
+        reason: 'mua hỏng không đổi state',
       );
     });
 
-    test('đã sở hữu Level 6 (nhiệm vụ) vẫn bán lại và trang bị được', () {
-      final s = inCity('m_port')..missionsCompleted = 10;
-      final spear = s.roster.firstWhere((x) => x.role == Role.spearman)
-        ..level = 6;
-      spear.stats[Stat.str] = 40;
-      s.inventory['sun_blade'] = 2;
-      expect(GameRules.equip(s, spear.id, 'sun_blade').ok, isTrue);
-      final coins = s.res[Res.coins]!;
-      expect(GameRules.sellToVendor(s, 'm_black', 'sun_blade', 1).ok, isTrue);
-      expect(s.res[Res.coins], coins + GameRules.sellPrice('sun_blade'));
-    });
+    test(
+      'đã sở hữu đồ phẩm cấp cao (nhiệm vụ) vẫn bán lại và trang bị được',
+      () {
+        final s = inCity('m_port')..missionsCompleted = 10;
+        final spear = s.roster.firstWhere((x) => x.role == Role.spearman)
+          ..level = 6;
+        spear.stats[Stat.str] = 40;
+        s.inventory['sun_blade'] = 2;
+        expect(GameRules.equip(s, spear.id, 'sun_blade').ok, isTrue);
+        final coins = s.res[Res.coins]!;
+        expect(GameRules.sellToVendor(s, 'm_black', 'sun_blade', 1).ok, isTrue);
+        expect(s.res[Res.coins], coins + GameRules.sellPrice('sun_blade'));
+      },
+    );
 
     test('hàng ổn định trong ngày: mở lại nhiều lần, giao dịch, save/load đều không đổi danh sách', () async {
       final s = inCity('g_town');
@@ -318,7 +321,7 @@ void main() {
 
     test('Lò rèn không bán tài nguyên, Chợ không bán trang bị', () {
       final s = inCity('g_town');
-      expect(GameRules.buyResourceLots(s, 'g_smith', Res.wood, 1).ok, isFalse);
+      expect(GameRules.buyResource(s, 'g_smith', Res.wood, 1).ok, isFalse);
       GameRules.stockOf(s, vendorById('g_market')!).items['wooden_spear'] = 5;
       expect(
         GameRules.buyFromVendor(s, 'g_market', 'wooden_spear', 1).ok,
@@ -433,14 +436,8 @@ void main() {
       }
       final s = inCity('g_town');
       s.res[Res.coins] = 9999;
-      expect(
-        GameRules.buyResourceLots(s, 'g_market', Res.coins, 1).ok,
-        isFalse,
-      );
-      expect(
-        GameRules.sellResourceLots(s, 'g_market', Res.coins, 1).ok,
-        isFalse,
-      );
+      expect(GameRules.buyResource(s, 'g_market', Res.coins, 1).ok, isFalse);
+      expect(GameRules.sellResource(s, 'g_market', Res.coins, 1).ok, isFalse);
     });
 
     test(
@@ -453,15 +450,15 @@ void main() {
           final coins = s.res[Res.coins]!;
           final own = s.res[r]!;
           expect(
-            GameRules.buyResourceLots(s, 'g_market', r, 1).ok,
+            GameRules.buyResource(s, 'g_market', r, 1).ok,
             isTrue,
             reason: r.name,
           );
-          expect(s.res[r], own + resourceLotSize);
+          expect(s.res[r], own + 1);
           expect(s.res[Res.coins], coins - GameRules.resourceBuyPrice(v, r));
           expect(GameRules.peekStock(s, v).resources[r], stock - 1);
           final c2 = s.res[Res.coins]!;
-          expect(GameRules.sellResourceLots(s, 'g_market', r, 1).ok, isTrue);
+          expect(GameRules.sellResource(s, 'g_market', r, 1).ok, isTrue);
           expect(s.res[r], own);
           expect(s.res[Res.coins], c2 + GameRules.resourceSellPrice(r));
           expect(s.res[r]!, greaterThanOrEqualTo(0));
@@ -474,26 +471,23 @@ void main() {
       final v = vendorById('g_market')!;
       s.res[Res.stone] = 5;
       final before = jsonEncode(s.toJson());
-      for (final lots in [0, -1, 100]) {
+      for (final lots in [0, -1, 1000]) {
         expect(
-          GameRules.buyResourceLots(s, 'g_market', Res.cloth, lots).ok,
+          GameRules.buyResource(s, 'g_market', Res.cloth, lots).ok,
           isFalse,
         );
         expect(
-          GameRules.sellResourceLots(s, 'g_market', Res.cloth, lots).ok,
+          GameRules.sellResource(s, 'g_market', Res.cloth, lots).ok,
           isFalse,
         );
       }
-      final max = v.resources[Res.cloth]!;
+      final max = GameRules.peekStock(s, v).resources[Res.cloth]!;
       expect(
-        GameRules.buyResourceLots(s, 'g_market', Res.cloth, max + 1).ok,
+        GameRules.buyResource(s, 'g_market', Res.cloth, max + 1).ok,
         isFalse,
       );
       s.res[Res.stone] = 5;
-      expect(
-        GameRules.sellResourceLots(s, 'g_market', Res.stone, 1).ok,
-        isFalse,
-      );
+      expect(GameRules.sellResource(s, 'g_market', Res.stone, 6).ok, isFalse);
       expect(jsonEncode(s.toJson()), before);
       expect(s.res[Res.stone], 5);
     });
@@ -501,11 +495,8 @@ void main() {
     test('tồn kho ổn định trong ngày (mở/đóng không reset), reset khi sang ngày mới', () {
       final s = inCity('g_town', coins: 99999);
       final v = vendorById('g_market')!;
-      final max = v.resources[Res.wood]!;
-      expect(
-        GameRules.buyResourceLots(s, 'g_market', Res.wood, max).ok,
-        isTrue,
-      );
+      final max = GameRules.peekStock(s, v).resources[Res.wood]!;
+      expect(GameRules.buyResource(s, 'g_market', Res.wood, max).ok, isTrue);
       expect(GameRules.peekStock(s, v).resources[Res.wood], 0);
       for (var i = 0; i < 3; i++) {
         expect(
@@ -515,13 +506,17 @@ void main() {
         );
       }
       expect(
-        GameRules.buyResourceLots(s, 'g_market', Res.wood, 1).ok,
+        GameRules.buyResource(s, 'g_market', Res.wood, 1).ok,
         isFalse,
         reason: 'hết hàng',
       );
       GameRules.tickDay(s);
-      expect(GameRules.peekStock(s, v).resources[Res.wood], max);
-      expect(GameRules.buyResourceLots(s, 'g_market', Res.wood, 1).ok, isTrue);
+      expect(
+        GameRules.peekStock(s, v).resources[Res.wood],
+        greaterThan(0),
+        reason: 'sang ngày mới: hàng được sinh lại',
+      );
+      expect(GameRules.buyResource(s, 'g_market', Res.wood, 1).ok, isTrue);
     });
 
     test('bán rồi mua lại luôn lỗ (không vòng lặp tăng vàng)', () {

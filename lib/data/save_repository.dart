@@ -2,9 +2,13 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../domain/equipment/equipment_service.dart';
 import '../domain/models.dart';
+import '../domain/rules.dart';
 import 'migration_v1_v3.dart';
 import 'migration_v2_v3.dart';
+import 'migration_v3_v4.dart';
+import 'migration_v4_v5.dart';
 
 abstract class KeyValueStore {
   Future<String?> read(String key);
@@ -84,15 +88,18 @@ class SaveRepository {
     this.currentVersion = latestVersion,
   }) : _steps = migrations == null
            ? const {
-               1: MigrationStep(3, migrateV1toV3),
-               2: MigrationStep(3, migrateV2toV3),
+               // v1 → v3 dựng binh sĩ bằng luật hiện hành nên đã ở thang chỉ số mới: đích là v4 luôn.
+               1: MigrationStep(5, _migrateV1toV5),
+               2: MigrationStep(5, _migrateV2toV5),
+               3: MigrationStep(5, _migrateV3toV5),
+               4: MigrationStep(5, migrateV4toV5),
              }
            : {
                for (final e in migrations.entries)
                  e.key: MigrationStep(e.key + 1, e.value),
              };
 
-  static const latestVersion = 3;
+  static const latestVersion = 5;
   static const primaryKey = 'save_primary';
   static const backupKey = 'save_backup';
   static String archiveKey(int version) => 'save_archive_v$version';
@@ -208,12 +215,25 @@ class SaveRepository {
         }
         version = step.to;
       }
-      return _Decoded(
-        state: GameState.fromJson(map),
-        migrated: from < currentVersion,
-      );
+      final state = GameState.fromJson(map);
+      // Đưa trang bị về trạng thái hợp lệ (không xóa dữ liệu; xem EquipmentService.sanitize).
+      EquipmentService.sanitize(state);
+      GameRules.clampVitals(state);
+      GameRules.sanitizeMissions(state);
+      return _Decoded(state: state, migrated: from < currentVersion);
     } catch (_) {
       return const _Decoded();
     }
   }
 }
+
+/// Các đường nâng cấp nhiều bước: v1/v2 dựng binh sĩ bằng luật hiện hành (xem [migrateV1toV3]); v2 còn quy lại
+/// Thể lực/Tinh thần; mọi đường kết thúc bằng bước v4 → v5.
+Map<String, dynamic> _migrateV1toV5(Map<String, dynamic> v1) =>
+    migrateV4toV5(migrateV1toV3(v1));
+
+Map<String, dynamic> _migrateV2toV5(Map<String, dynamic> v2) =>
+    migrateV4toV5(migrateV3toV4(migrateV2toV3(v2), rescaleHp: false));
+
+Map<String, dynamic> _migrateV3toV5(Map<String, dynamic> v3) =>
+    migrateV4toV5(migrateV3toV4(v3));

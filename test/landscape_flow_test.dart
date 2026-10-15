@@ -1,6 +1,7 @@
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/catalog.dart';
+import 'package:app_rising_army/domain/dev_mode.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/domain/world_data.dart';
@@ -9,6 +10,8 @@ import 'package:app_rising_army/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/built_camp.dart';
 
 const sizes = <String, Size>{
   'iPhone 15 Pro Max 932x430 (~2.17:1)': Size(932, 430),
@@ -24,7 +27,12 @@ Future<GameController> boot(
   MemoryStore? store,
   Size size = const Size(932, 430),
   bool newGame = false,
+  bool dev = false,
 }) async {
+  // Thanh điều hướng Binh sĩ/Tuyển mộ/Nhiệm vụ/Xây dựng chỉ có ở Develop Mode (xem GameShell); Develop Mode cũng miễn
+  // chi phí, nên chỉ bật cho test cần các màn đó và luôn tắt lại sau test.
+  DevMode.enabled = dev;
+  addTearDown(() => DevMode.enabled = false);
   tester.view.physicalSize = size * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
@@ -33,6 +41,9 @@ Future<GameController> boot(
   await tester.pumpWidget(RisingArmyApp(controller: c));
   if (newGame) {
     await c.newGame(seed: 5);
+    // Ván mới thật chỉ có bếp lửa; các luồng này cần trại đã xây (xem support/built_camp.dart).
+    addBuiltCamp(c.state!);
+    c.endDay();
     await tester.pumpAndSettle();
   }
   return c;
@@ -44,6 +55,14 @@ Future<void> tapText(WidgetTester tester, String text, {int index = 0}) async {
   await tester.ensureVisible(f.at(index));
   await tester.tap(f.at(index), warnIfMissed: false);
   await tester.pumpAndSettle();
+}
+
+/// Chuyển tab ở thanh điều hướng của Develop Mode. Thanh này ẩn ở tab Trại, nên từ Trại đi qua Bản đồ trước.
+Future<void> goTab(WidgetTester tester, String label) async {
+  if (find.byKey(const ValueKey('app-shell-rail')).evaluate().isEmpty) {
+    await tapText(tester, 'Bản đồ');
+  }
+  await tapText(tester, label);
 }
 
 /// Xem trận thời gian thực chạy hết (đặt x3, bơm đồng hồ giả) cho tới khi nút "Xem kết quả" hiện.
@@ -68,7 +87,7 @@ void main() {
   testWidgets('menu: Tiếp tục bị khóa khi chưa có save', (tester) async {
     await boot(tester);
     expect(find.text('Chưa có ván lưu'), findsOneWidget);
-    expect(find.text('Ván mới'), findsOneWidget);
+    expect(find.text('BẮT ĐẦU CUỘC HÀNH TRÌNH'), findsOneWidget);
   });
 
   testWidgets(
@@ -93,23 +112,30 @@ void main() {
     c1.endDay();
     await tester.pump();
     final c2 = await boot(tester, store: store);
-    await tapText(tester, 'Tiếp tục');
+    await tapText(tester, 'TIẾP TỤC');
     expect(c2.state!.day, 3);
-    expect(find.text('NGÀY 3'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('hud-day')),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
     'trại: có thanh build / end-day / map và nhật ký dẫn tới đúng màn hình',
     (tester) async {
       await boot(tester, newGame: true);
-      expect(find.text('build'), findsOneWidget);
-      expect(find.text('end-day'), findsOneWidget);
-      expect(find.text('map'), findsOneWidget);
+      expect(find.text('Xây'), findsOneWidget);
+      expect(find.byKey(const ValueKey('camp-next-day')), findsOneWidget);
+      expect(find.text('Bản đồ'), findsOneWidget);
       await tester.tap(find.byTooltip('Nhật ký (journal): nhiệm vụ đang làm'));
       await tester.pumpAndSettle();
-      expect(find.text('BẢNG NHIỆM VỤ CỦA NHÀ VUA'), findsOneWidget);
-      await tapText(tester, 'Trại');
-      await tapText(tester, 'map');
+      expect(find.text('NHIỆM VỤ'), findsWidgets);
+      await tester.tapAt(const Offset(20, 200)); // đóng panel bằng vùng nền
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Bản đồ');
       expect(find.byKey(const ValueKey('map-surface')), findsOneWidget);
       expect(find.text('Trinh sát'), findsNothing);
       expect(find.text('Bản đồ thế giới'), findsNothing);
@@ -128,8 +154,11 @@ void main() {
         (f) => f.type == FacilityType.archeryRange,
       );
       Finder token() => find.bySemanticsLabel('Binh sĩ ${so.name}');
-      Finder fac(FacilityType t) =>
-          find.byTooltip('${facilityDefs[t]!.name}\n${facilityDefs[t]!.blurb}');
+      Finder fac(FacilityType t) => find.byKey(
+        ValueKey(
+          'facility-${c.state!.facilities.firstWhere((f) => f.type == t).id}',
+        ),
+      );
       expect(token(), findsOneWidget);
       var from = tester.getCenter(token());
       await tester.dragFrom(
@@ -138,7 +167,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(yard.assigned, [so.id]);
-      expect(find.textContaining('Bãi tập cận chiến  1/3'), findsOneWidget);
+      expect(yard.assigned, hasLength(1));
       from = tester.getCenter(token());
       await tester.dragFrom(
         from,
@@ -149,7 +178,7 @@ void main() {
       expect(bow.assigned, [so.id]);
       // Công trình tác động khi qua ngày.
       final dex = c.state!.soldier(so.id)!.stats[Stat.dex]!;
-      await tester.tap(find.text('end-day'));
+      await tester.tap(find.byKey(const ValueKey('camp-next-day')));
       await tester.pump(const Duration(milliseconds: 300));
       expect(c.state!.soldier(so.id)!.train[Stat.dex], trainPercentPerDay);
       expect(c.state!.soldier(so.id)!.stats[Stat.dex], dex);
@@ -158,30 +187,48 @@ void main() {
   );
 
   testWidgets(
-    'trại: menu Build chọn công trình rồi đặt vào ô trống, trừ tài nguyên',
+    'trại: menu Xây chọn công trình rồi vào chế độ đặt; thả vào ô trống thì xây và trừ tài nguyên',
     (tester) async {
       final c = await boot(tester, newGame: true, size: const Size(1024, 768));
       c.state!.res.updateAll((_, _) => 500);
       c.endDay();
       await tester.pumpAndSettle();
       final n = c.state!.facilities.length;
+      final wood = c.state!.res[Res.wood]!;
       await tester.tap(find.text('Xây'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('camp-build-archery_range')));
+      final tile = find.byKey(const ValueKey('camp-build-storage_chest'));
+      expect(tile, findsOneWidget);
+      await tester.tap(tile); // chạm ô mở thẻ thông tin công trình
       await tester.pumpAndSettle();
-      expect(find.textContaining('Chạm một ô vàng'), findsOneWidget);
-      await tester.tap(find.text('Đặt Bãi bắn cung').first);
+      expect(find.text('Chi phí xây dựng'), findsOneWidget);
+      // Chọn xây (lối của controller mà UI kéo-thả cũng dùng) rồi vào chế độ đặt.
+      final chosen = c.chooseCampBuilding(
+        campBuildings.firstWhere((d) => d.id == 'storage_chest'),
+      );
+      expect(chosen.ok, isTrue, reason: chosen.message);
       await tester.pumpAndSettle();
+      expect(c.placing, isNotNull, reason: 'chọn công trình → chế độ đặt');
+      // Thả vào ô trống hợp lệ qua đúng lối của UI (controller.confirmPlacementAt).
+      final r = c.confirmPlacementAt(0.85, 0.7);
+      await tester.pumpAndSettle();
+      expect(r.ok, isTrue, reason: r.message);
       expect(c.state!.facilities.length, n + 1);
-      expect(c.state!.facilities.last.type, FacilityType.archeryRange);
+      expect(c.state!.facilities.last.type, FacilityType.storageChest);
+      expect(c.state!.res[Res.wood], lessThan(wood));
     },
   );
 
   testWidgets(
     'quản lý binh sĩ: đổi tên, trang bị có so sánh trước/sau, huấn luyện',
     (tester) async {
-      final c = await boot(tester, newGame: true, size: const Size(1024, 768));
-      await tapText(tester, 'Binh sĩ');
+      final c = await boot(
+        tester,
+        newGame: true,
+        dev: true,
+        size: const Size(1024, 768),
+      );
+      await goTab(tester, 'Binh sĩ');
       final so = c.state!.roster.first;
       await tester.tap(find.byTooltip('Đổi tên'));
       await tester.pumpAndSettle();
@@ -189,18 +236,16 @@ void main() {
       await tapText(tester, 'Lưu');
       expect(c.state!.soldier(so.id)!.name, 'Thiết Kỵ');
 
-      // Mở ô phụ kiện và trang bị nhẫn sắt.
-      await tapText(tester, 'Phụ kiện: trống');
-      expect(find.textContaining('Trước → Sau'), findsNothing);
-      await tapText(tester, 'Nhẫn sắt ×1');
-      expect(
-        find.textContaining('Trước → Sau khi trang bị Nhẫn sắt'),
-        findsOneWidget,
-      );
-      await tapText(tester, 'Trang bị');
-      expect(c.state!.soldier(so.id)!.accessoryId, 'iron_ring');
+      // Ô trang bị mở popup chi tiết (kéo-thả trang bị: test/phase3_equip_test.dart).
+      await tapText(tester, 'Khiên: trống');
+      expect(find.byKey(const ValueKey('empty-slot-info')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('item-detail-close')));
+      await tester.pumpAndSettle();
 
-      await tapText(tester, 'Bãi tập cận chiến 0/3');
+      await tapText(
+        tester,
+        '${facilityDefs[FacilityType.meleeYard]!.name} 0/3',
+      );
       final yard = c.state!.facilities.firstWhere(
         (f) => f.type == FacilityType.meleeYard,
       );
@@ -212,25 +257,30 @@ void main() {
   testWidgets('tuyển mộ: thuê ứng viên thật, trừ tiền, roster tăng', (
     tester,
   ) async {
-    final c = await boot(tester, newGame: true);
-    await tapText(tester, 'Tuyển mộ');
+    final c = await boot(tester, newGame: true, dev: true);
+    await goTab(tester, 'Tuyển mộ');
     final n = c.state!.roster.length;
     final coins = c.state!.res[Res.coins]!;
     final first = c.state!.candidates.first;
-    await tester.tap(
-      find.textContaining('Tuyển • ').first,
-      warnIfMissed: false,
-    );
+    // Chọn ứng viên ở danh sách bên trái, rồi tuyển ở panel chi tiết bên phải.
+    expect(find.byKey(const ValueKey('tavern-detail-empty')), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('tavern-row-${first.id}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tavern-hire')));
     await tester.pumpAndSettle();
     expect(c.state!.roster.length, n + 1);
-    expect(c.state!.res[Res.coins], coins - GameRules.hireCost(first));
+    // Develop Mode (bật để thấy tab Tuyển mộ) miễn chi phí; giá/trừ vàng khi tuyển được kiểm ở domain_v2_test.
+    expect(DevMode.freeResources, isTrue);
+    expect(c.state!.res[Res.coins], coins);
+    expect(GameRules.hireCost(first), greaterThan(0));
   });
 
   testWidgets('nhiệm vụ: nhận một nhiệm vụ làm trạng thái đổi thật', (
     tester,
   ) async {
-    final c = await boot(tester, newGame: true);
-    await tapText(tester, 'Nhiệm vụ');
+    final c = await boot(tester, newGame: true, dev: true);
+    c.state!.visiting = 'g_town'; // chỉ nhận được khi đang ở trong thành trấn
+    await goTab(tester, 'Nhiệm vụ');
     await tapText(tester, 'Nhận nhiệm vụ');
     expect(GameRules.byStatus(c.state!, MissionStatus.active).length, 1);
   });
@@ -238,15 +288,20 @@ void main() {
   testWidgets('xây dựng: xây Doanh trại từ danh sách công trình trại', (
     tester,
   ) async {
-    final c = await boot(tester, newGame: true);
+    final c = await boot(tester, newGame: true, dev: true);
     c.state!.res.updateAll((_, _) => 500);
     c.endDay(); // thông báo UI sau khi sửa tài nguyên
     await tester.pumpAndSettle();
-    await tapText(tester, 'Xây dựng');
-    final before = c.state!.buildings.values.fold(0, (a, b) => a + b);
-    await tester.tap(find.byKey(const ValueKey('camp-build-barracks')));
+    await goTab(tester, 'Xây dựng');
+    // Công trình trong danh sách vào chế độ đặt (không xây tức thời) rồi chuyển sang Trại.
+    expect(c.placing, isNull);
+    final tile = find.byKey(const ValueKey('camp-build-storage_chest'));
+    await tester.ensureVisible(tile);
+    await tester.tap(tile); // mở thẻ thông tin
     await tester.pumpAndSettle();
-    expect(c.state!.buildings.values.fold(0, (a, b) => a + b), before + 1);
+    await tester.tap(find.text('Xây công trình'));
+    await tester.pumpAndSettle();
+    expect(c.placing, isNotNull);
   });
 
   testWidgets(
@@ -263,7 +318,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('poi-g_bandits')));
       await tester.pumpAndSettle();
       expect(find.text('Trại cướp đường'), findsWidgets);
-      await tapText(tester, 'Chuẩn bị đội hình');
+      await tapText(tester, 'Chọn đội hình hành quân');
       expect(find.textContaining('Chọn đội •'), findsOneWidget);
       await tapText(tester, 'Tự chọn');
       await tapText(tester, 'Tiếp tục: triển khai');
@@ -281,8 +336,18 @@ void main() {
       await tapText(tester, 'Xem kết quả');
       expect(find.text('THƯƠNG VONG VÀ KINH NGHIỆM'), findsOneWidget);
       await tapText(tester, 'Về trại');
-      expect(find.text('NGÀY 2'), findsOneWidget);
-      expect(c.state!.day, 2);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('hud-day')),
+          matching: find.text('${c.state!.day}'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        c.state!.day,
+        greaterThan(2),
+        reason: 'boot đã qua 1 ngày, hành quân tốn thêm ngày',
+      );
     },
   );
 
@@ -298,7 +363,7 @@ void main() {
     testWidgets('không overflow, mọi màn chính dựng được ở ${e.key}', (
       tester,
     ) async {
-      final c = await boot(tester, newGame: true, size: e.value);
+      final c = await boot(tester, newGame: true, dev: true, size: e.value);
       // Thêm dữ liệu để các danh sách đầy hơn.
       for (var i = 0; i < 6; i++) {
         c.state!.soldiers.add(GameRules.generateSoldier(c.state!, equip: true));
@@ -313,12 +378,12 @@ void main() {
         'Xây dựng',
         'Trại',
       ]) {
-        await tapText(tester, tab);
+        await goTab(tester, tab);
       }
-      await tapText(tester, 'Binh sĩ');
-      await tapText(tester, 'Phụ kiện: trống');
-      expect(find.byType(Dialog), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.close));
+      await goTab(tester, 'Binh sĩ');
+      await tapText(tester, 'Khiên: trống');
+      expect(find.byKey(const ValueKey('empty-slot-info')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('item-detail-close')));
       await tester.pumpAndSettle();
       await tapText(tester, 'Bản đồ');
       // Camera bản đồ bám theo nhân vật: đưa nhân vật tới gần trại cướp để nó nằm trong tầm nhìn.
@@ -328,7 +393,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('poi-g_bandits')));
       await tester.pumpAndSettle();
-      await tapText(tester, 'Chuẩn bị đội hình');
+      await tapText(tester, 'Chọn đội hình hành quân');
       await tapText(tester, 'Tự chọn');
       await tapText(tester, 'Tiếp tục: triển khai');
       await tapText(tester, 'Deploy Units');

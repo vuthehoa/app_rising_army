@@ -5,6 +5,7 @@ import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/camp_layout.dart';
 import 'package:app_rising_army/domain/catalog.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/main.dart';
@@ -185,13 +186,13 @@ void main() {
           expect(GameRules.chestCount(c.state!), i - 1, reason: 'chưa xây');
           expect(
             GameRules.inventoryCapacity(c.state!),
-            cap0 + (i - 1) * chestInventoryBonus,
+            cap0 + (i - 1) * WeightEconomy.perChestKg,
           );
           await dropAt(tester, const [0.2, 0.3, 0.8][i - 1], 0.3);
           expect(GameRules.chestCount(c.state!), i);
           expect(
             GameRules.inventoryCapacity(c.state!),
-            cap0 + i * chestInventoryBonus,
+            cap0 + i * WeightEconomy.perChestKg,
           );
         }
         final ids = c.state!.facilities.map((f) => f.id);

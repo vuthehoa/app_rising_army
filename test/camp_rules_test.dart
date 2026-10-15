@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/dev_mode.dart';
 import 'package:app_rising_army/domain/models.dart';
@@ -126,7 +127,11 @@ void main() {
         GameRules.buildFacility(s, FacilityType.barracks, slot).ok,
         isTrue,
       );
-      expect(s.res[Res.coins], coins - upgradeCosts[1]![Res.coins]!);
+      expect(
+        s.res[Res.coins],
+        coins -
+            ConstructionEconomy.buildCost(FacilityType.barracks)[Res.coins]!,
+      );
       expect(GameRules.facilityCount(s, FacilityType.barracks), 1);
       expect(s.buildings[Building.barracks], 1);
       // Lần hai bị từ chối ở domain; sau đó chỉ còn nâng cấp.
@@ -192,7 +197,10 @@ void main() {
       final base = GameRules.inventoryCapacity(s);
       GameRules.buildFacility(s, FacilityType.storageChest, -1);
       GameRules.buildFacility(s, FacilityType.storageChest, -1);
-      expect(GameRules.inventoryCapacity(s), base + 2 * chestInventoryBonus);
+      expect(
+        GameRules.inventoryCapacity(s),
+        base + 2 * WeightEconomy.perChestKg,
+      );
       final loaded = GameState.fromJson(
         jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>,
       );
@@ -208,27 +216,33 @@ void main() {
       );
       expect(
         GameRules.inventoryCapacity(s),
-        inventoryCapacityFor(1) + 2 * chestInventoryBonus,
+        WeightEconomy.capacityKg(1, 0) + 2 * WeightEconomy.perChestKg,
       );
     });
 
-    test('xây hòm không mất vật phẩm; mua tuân theo giới hạn sức chứa mới', () {
-      final s = rich();
-      final items = Map.of(s.inventory);
-      GameRules.buildFacility(s, FacilityType.storageChest, -1);
-      expect(s.inventory, items);
-      // Đầy kho đến sát giới hạn cơ bản, rồi hòm mở thêm chỗ.
-      s.inventory['padded_armor'] =
-          GameRules.inventoryCapacity(s) -
-          GameRules.inventoryCount(s) +
-          s.inventory['padded_armor']!;
-      expect(GameRules.inventoryCount(s), GameRules.inventoryCapacity(s));
-      GameRules.buildFacility(s, FacilityType.storageChest, -1);
-      expect(
-        GameRules.inventoryCapacity(s) - GameRules.inventoryCount(s),
-        chestInventoryBonus,
-      );
-    });
+    test(
+      'xây hòm không mất vật phẩm; chỗ trống trong rương tăng đúng một hòm',
+      () {
+        final s = rich();
+        final items = Map.of(s.inventory);
+        final res = Map.of(s.res);
+        final roomBefore =
+            GameRules.inventoryCapacityTenths(s) -
+            GameRules.inventoryWeightTenths(s);
+        GameRules.buildFacility(s, FacilityType.storageChest, -1);
+        expect(s.inventory, items);
+        final cost = ConstructionEconomy.buildCost(FacilityType.storageChest);
+        // Chi phí xây là tài nguyên bị trừ nên rương nhẹ đi; chỗ trống = tăng sức chứa + phần tài nguyên đã tiêu.
+        var spentWeight = 0;
+        cost.forEach((r, n) => spentWeight += WeightEconomy.ofResource(r, n));
+        expect(res.keys, s.res.keys);
+        expect(
+          GameRules.inventoryCapacityTenths(s) -
+              GameRules.inventoryWeightTenths(s),
+          roomBefore + WeightEconomy.perChestKg * 10 + spentWeight,
+        );
+      },
+    );
 
     test('thiếu tài nguyên thì không xây và không trừ một phần', () {
       final s = GameRules.newGame(seed: 1)..res.updateAll((_, _) => 0);
@@ -329,6 +343,15 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(f);
           await tester.pumpAndSettle();
+          // Chạm ô mở thẻ thông tin; nút "Xây công trình" mới bắt đầu luồng đặt (đã xây thì không có nút).
+          final build = find.text('Xây công trình');
+          if (build.evaluate().isNotEmpty) {
+            await tester.tap(build);
+            await tester.pumpAndSettle();
+          } else if (find.text('Đóng').evaluate().isNotEmpty) {
+            await tester.tap(find.text('Đóng'));
+            await tester.pumpAndSettle();
+          }
         }
 
         // Chọn Hòm đồ chỉ bắt đầu luồng đặt: chưa xây, chưa tăng sức chứa.
@@ -340,9 +363,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           GameRules.inventoryCapacity(c.state!),
-          cap + chestInventoryBonus,
+          cap + WeightEconomy.perChestKg,
         );
-        expect(find.textContaining('Đã có 1'), findsOneWidget);
+        expect(GameRules.chestCount(c.state!), 1);
 
         await choose('gravestone');
         expect(c.placing, FacilityType.gravestone);
@@ -358,7 +381,12 @@ void main() {
         await choose('gravestone');
         expect(c.placing, isNull, reason: 'đã xây thì không vào chế độ đặt');
         expect(GameRules.facilityCount(c.state!, FacilityType.gravestone), 1);
-        expect(find.textContaining('Đã xây 1/1'), findsWidgets);
+        // Giao diện phản ánh ngay: ô Bia mộ đã xây bị khóa (mờ, không thao tác).
+        final grave = campBuildings.firstWhere((d) => d.id == 'gravestone');
+        expect(
+          CampBuildTile.isLocked(GameRules.campStatus(c.state!, grave)),
+          isTrue,
+        );
       },
     );
   });

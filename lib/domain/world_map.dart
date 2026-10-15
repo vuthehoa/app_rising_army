@@ -378,6 +378,7 @@ class WorldMap {
   /// Địa hình hiệu lực khi di chuyển tại [p]: loại địa hình + có đang đi trên đường mòn không.
   ({TerrainType terrain, bool onTrail}) movementAt(WPoint p) {
     final t = terrainAt(p);
+    // Nước / vách đá / ngoài bản đồ: không được hưởng giá đường mòn.
     if (!TerrainRules.passable(t)) return (terrain: t, onTrail: false);
     return (terrain: t, onTrail: onTrail(p));
   }

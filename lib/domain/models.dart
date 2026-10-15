@@ -13,9 +13,13 @@ enum Role { spearman, archer, cavalry }
 /// Ba thuộc tính huấn luyện được (VERIFIED: ảnh chụp bảng binh sĩ). Tốc độ là chỉ số dẫn xuất, không phải thuộc tính.
 enum Stat { str, dex, con }
 
-/// Ba nhóm trang bị bán ở Lò rèn: vũ khí, giáp, khiên. [accessory] là ô phụ kiện có từ trước (nhẫn, giày, bùa):
-/// vẫn dùng được và bán lại được, nhưng không phải nhóm hàng của Lò rèn.
-enum Slot { weapon, armor, shield, helmet, accessory }
+/// Bốn chỉ số chính người chơi cộng bằng điểm cấp: Sức mạnh ([Stat.str]), Tốc độ ([Stat.dex]),
+/// Thể hình ([Stat.con]) và Công (`Soldier.atkPoints`, chưa từng có chỉ số cơ bản nên là trường riêng).
+enum MainStat { strength, speed, build, attack }
+
+/// Ba ô trang bị duy nhất: vũ khí, giáp (đã gồm mũ), khiên. Không có ô mũ hay phụ kiện riêng; save cũ có mũ/phụ kiện
+/// được chuyển đổi có kiểm soát ở migration v3→v4 (xem `data/migration_v3_v4.dart`).
+enum Slot { weapon, armor, shield }
 
 /// Nhóm vũ khí. Mỗi nhóm có bản sắc chiến đấu riêng (xem [ItemDef] và `weaponProfiles`) và một tiến trình
 /// thành thạo độc lập; KHÔNG liên quan tới nghề: ai cũng dùng được mọi nhóm.
@@ -131,9 +135,7 @@ class Soldier {
     this.trait = TraitId.none,
     this.weaponId,
     this.armorId,
-    this.accessoryId,
     this.shieldId,
-    this.helmetId,
     this.morale = 70,
     this.energy = maxEnergy,
     this.hp = 0,
@@ -141,6 +143,9 @@ class Soldier {
     Map<Stat, int>? train,
     this.kills = 0,
     this.battles = 0,
+    this.statPoints = 0,
+    this.atkPoints = 0,
+    this.needsTreatment = false,
     this.campX,
     this.campY,
     Map<WeaponType, int>? mastery,
@@ -160,9 +165,7 @@ class Soldier {
   final TraitId trait;
   String? weaponId;
   String? armorId;
-  String? accessoryId;
   String? shieldId;
-  String? helmetId;
   int morale;
 
   /// Năng lượng 0..[maxEnergy]; đổi theo ngày do công trình ([facilityEffects]).
@@ -176,6 +179,16 @@ class Soldier {
   final Map<Stat, int> train;
   int kills;
   int battles;
+
+  /// Điểm chỉ số chưa phân bổ (1 điểm mỗi lần lên cấp, tối đa tới cấp 6). Lưu trong save.
+  int statPoints;
+
+  /// Điểm "Công" đã phân bổ (xem [MainStat.attack]).
+  int atkPoints;
+
+  /// Vừa được hồi sinh (HP = 1): bắt buộc chữa trị ở Lều cứu thương tới khi HP đạt nửa tối đa mới được tái sử
+  /// dụng. Trong lúc này [available] là false nên domain chặn xuất quân, không chỉ khóa nút giao diện.
+  bool needsTreatment;
 
   /// Vị trí đứng tự do trong Trại (tọa độ chuẩn hóa của khung Trại, tâm hình lính). Null = chưa đặt
   /// (lính nhàn rỗi tự đi lại theo ngày). Chỉ là vị trí trình bày, không ảnh hưởng chỉ số.
@@ -193,14 +206,12 @@ class Soldier {
   bool get alive => status == SoldierStatus.active;
 
   /// Có thể xuất quân: còn sống và còn HP.
-  bool get available => alive && hp > 0;
+  bool get available => alive && hp > 0 && !needsTreatment;
 
   String? equipped(Slot s) => switch (s) {
     Slot.weapon => weaponId,
     Slot.armor => armorId,
     Slot.shield => shieldId,
-    Slot.helmet => helmetId,
-    Slot.accessory => accessoryId,
   };
 
   void setEquipped(Slot s, String? id) {
@@ -211,10 +222,6 @@ class Soldier {
         armorId = id;
       case Slot.shield:
         shieldId = id;
-      case Slot.helmet:
-        helmetId = id;
-      case Slot.accessory:
-        accessoryId = id;
     }
   }
 
@@ -228,9 +235,7 @@ class Soldier {
     'trait': trait.name,
     'weapon': weaponId,
     'armor': armorId,
-    'accessory': accessoryId,
     'shield': shieldId,
-    if (helmetId != null) 'helmet': helmetId,
     'morale': morale,
     'energy': energy,
     'hp': hp,
@@ -238,6 +243,9 @@ class Soldier {
     'train': {for (final e in train.entries) e.key.name: e.value},
     'kills': kills,
     'battles': battles,
+    if (statPoints > 0) 'points': statPoints,
+    if (atkPoints > 0) 'atk': atkPoints,
+    if (needsTreatment) 'treat': true,
     if (mastery.isNotEmpty)
       'mastery': {
         for (final t in WeaponType.values)
@@ -269,26 +277,28 @@ class Soldier {
       name: name,
       role: enumByName(Role.values, j['role']),
       stats: stats,
-      level: intIn(j['level'], 1, 99, 'cấp'),
+      // Save cũ có cấp > 6 (trần cũ là 20) được kẹp về trần mới; không cấp điểm bù.
+      level: intIn(j['level'], 1, 99, 'cấp').clamp(1, 6),
       xp: intIn(j['xp'], 0, 1 << 30),
       trait: enumByName(TraitId.values, j['trait']),
       weaponId: item(j['weapon']),
       armorId: item(j['armor']),
-      accessoryId: item(j['accessory']),
       shieldId: item(j['shield']),
-      helmetId: item(j['helmet']),
       mastery: _readMastery(j['mastery']),
       skills: _readSkills(j['skills']),
       talents: _readTalents(j['talents']),
-      morale: intIn(j['morale'], 0, 100, 'tinh thần'),
+      morale: intIn(j['morale'], 0, 400, 'tinh thần'),
       energy: j['energy'] == null
           ? maxEnergy
-          : intIn(j['energy'], 0, maxEnergy, 'năng lượng'),
+          : intIn(j['energy'], 0, 400, 'năng lượng'),
       hp: intIn(j['hp'], 0, 100000, 'HP'),
       status: enumByName(SoldierStatus.values, j['status']),
       train: readEnumMap(Stat.values, j['train'], max: 99),
       kills: intIn(j['kills'], 0, 1 << 30),
       battles: intIn(j['battles'], 0, 1 << 30),
+      statPoints: j['points'] == null ? 0 : intIn(j['points'], 0, 99),
+      atkPoints: j['atk'] == null ? 0 : intIn(j['atk'], 0, 99),
+      needsTreatment: j['treat'] == true,
       campX: campCoord(j['campX']),
       campY: campCoord(j['campY']),
     );
@@ -322,6 +332,9 @@ class Facility {
   static const upgradedCapacity = 6;
   static const maxLevel = 2;
 
+  /// Số chỗ tối đa của Doanh trại (cấp bậc tối đa): 6 + 4 × 3. Số chỗ thật theo cấp: `GameRules.slotsOf`.
+  static const barracksMaxSlots = 18;
+
   int get slots => level >= maxLevel ? upgradedCapacity : capacity;
 
   Map<String, dynamic> toJson() => {
@@ -342,17 +355,71 @@ class Facility {
     final level = j['level'] == null
         ? 1
         : intIn(j['level'], 1, maxLevel, 'cấp công trình');
-    if (a is! List ||
-        a.length > (level >= maxLevel ? upgradedCapacity : capacity)) {
+    final type = enumByName(FacilityType.values, j['type']);
+    // Doanh trại có số chỗ theo cấp bậc (6 + 4 mỗi cấp, tối đa cấp 3); các công trình khác theo cấp slot.
+    final maxAssigned = type == FacilityType.barracks
+        ? barracksMaxSlots
+        : (level >= maxLevel ? upgradedCapacity : capacity);
+    if (a is! List || a.length > maxAssigned) {
       throw const FormatException('Danh sách gán công trình không hợp lệ');
     }
     return Facility(
       id: intIn(j['id'], 1, 1 << 30, 'id công trình'),
-      type: enumByName(FacilityType.values, j['type']),
+      type: type,
       x: x.toDouble(),
       y: y.toDouble(),
       assigned: [for (final e in a) intIn(e, 1, 1 << 30, 'id binh sĩ')],
       level: level,
+    );
+  }
+}
+
+/// Điểm giao chiến sinh ra khi nhận nhiệm vụ săn (vòng lặp chiến đấu vô hạn): vị trí thế giới cố định, độ khó và
+/// đội địch. Lưu cùng [Mission] nên khôi phục đúng sau save/load. Id ổn định `enc_<id nhiệm vụ>`.
+class Encounter {
+  const Encounter({
+    required this.x,
+    required this.y,
+    required this.difficulty,
+    required this.enemies,
+  });
+
+  final double x, y;
+
+  /// 1..5 (số đầu lâu).
+  final int difficulty;
+
+  /// Đội địch: (nghề, cấp, số lượng).
+  final List<(Role, int, int)> enemies;
+
+  Map<String, dynamic> toJson() => {
+    'x': x,
+    'y': y,
+    'd': difficulty,
+    'e': [
+      for (final (r, l, c) in enemies) [r.index, l, c],
+    ],
+  };
+
+  factory Encounter.fromJson(Map<String, dynamic> j) {
+    final x = j['x'], y = j['y'];
+    final e = j['e'];
+    if (x is! num || y is! num || e is! List) {
+      throw const FormatException('Điểm giao chiến hỏng');
+    }
+    return Encounter(
+      x: x.toDouble(),
+      y: y.toDouble(),
+      difficulty: intIn(j['d'], 1, 5, 'độ khó'),
+      enemies: [
+        for (final r in e)
+          if (r is List && r.length == 3)
+            (
+              Role.values[intIn(r[0], 0, Role.values.length - 1)],
+              intIn(r[1], 1, 20),
+              intIn(r[2], 1, 20),
+            ),
+      ],
     );
   }
 }
@@ -363,17 +430,25 @@ class Mission {
     required this.templateId,
     this.status = MissionStatus.offered,
     this.deadline = 0,
+    this.days = 0,
     this.progress = 0,
     this.giverTown,
     this.targetId,
     this.rewarded = false,
+    this.encounter,
     List<int>? squad,
   }) : squad = squad ?? [];
 
   final int id;
   final String templateId;
   MissionStatus status;
+
+  /// Ngày game mà nhiệm vụ hết hạn (= ngày nhận + [days]). Số ngày còn lại là `deadline - state.day`, suy ra từ
+  /// ngày của game nên chỉ đổi khi qua ngày thật sự (không có bộ đếm riêng để giảm trùng).
   int deadline;
+
+  /// Thời hạn ban đầu (số ngày), random đúng một lần khi nhận nhiệm vụ; 0 = save cũ không ghi.
+  int days;
   int progress;
 
   /// Thành trấn nơi nhiệm vụ được nhận (điểm nộp cho nhiệm vụ không có địa điểm riêng).
@@ -382,6 +457,9 @@ class Mission {
   /// Id địa điểm mục tiêu trên bản đồ (điểm nhiệm vụ). Chỉ có khi đang thực hiện; dữ liệu nguồn của
   /// dấu mục tiêu và mũi tên chỉ hướng, nên được lưu cùng nhiệm vụ.
   String? targetId;
+
+  /// Điểm giao chiến của nhiệm vụ săn (chỉ có sau khi nhận nhiệm vụ). `targetId` là `enc_<id>`.
+  Encounter? encounter;
 
   /// Đã trao thưởng. Chốt chống trao trùng (khi mở lại màn hình, tải save, bấm liên tục).
   bool rewarded;
@@ -394,10 +472,12 @@ class Mission {
     'template': templateId,
     'status': status.name,
     'deadline': deadline,
+    if (days > 0) 'days': days,
     'progress': progress,
     if (giverTown != null) 'giver': giverTown,
     if (targetId != null) 'target': targetId,
     if (rewarded) 'rewarded': true,
+    if (encounter != null) 'enc': encounter!.toJson(),
     if (squad.isNotEmpty) 'squad': squad,
   };
 
@@ -410,10 +490,14 @@ class Mission {
       templateId: t,
       status: enumByName(MissionStatus.values, j['status']),
       deadline: intIn(j['deadline'], 0, 1 << 30),
+      days: j['days'] is int ? intIn(j['days'], 0, 1000) : 0,
       progress: intIn(j['progress'], 0, 1 << 30),
       giverTown: j['giver'] is String ? j['giver'] as String : null,
       targetId: j['target'] is String ? j['target'] as String : null,
       rewarded: j['rewarded'] == true,
+      encounter: j['enc'] is Map
+          ? Encounter.fromJson(Map<String, dynamic>.from(j['enc'] as Map))
+          : null,
       squad: sq is List
           ? [
               for (final e in sq)
@@ -485,7 +569,7 @@ class HeroState {
         if (p.x.isFinite &&
             p.y.isFinite &&
             stamina.isFinite &&
-            worldMap.isPassable(p)) {
+            worldMap.inBounds(p)) {
           return HeroState(
             x: p.x,
             y: p.y,
@@ -541,6 +625,8 @@ class GameState {
     Map<String, ShopStock>? shops,
     this.visiting,
     this.tradeCount = 0,
+    this.reliefDay = -1,
+    this.nextItemSerial = 0,
     this.identity = PlayerIdentity.defaults,
     HeroState? hero,
   }) : shops = shops ?? {},
@@ -576,6 +662,12 @@ class GameState {
   /// Thành phố đang ở (đã hành quân tới). Chỉ giao dịch được khi đang ở thành phố có người bán đó.
   String? visiting;
   int tradeCount;
+
+  /// Ngày cứu trợ chống softlock gần nhất (-1 = chưa dùng). Lưu trong save để load/thoát không đặt lại.
+  int reliefDay;
+
+  /// Bộ đếm sinh mã biến thể trang bị (xem `EquipmentService.mint`). Chỉ tăng; thiếu trong save cũ = 0.
+  int nextItemSerial;
 
   /// Avatar + quân kỳ. Tách biệt hoàn toàn khỏi [soldiers]; không có chỉ số chiến đấu.
   /// Trường tùy chọn của save v3: thiếu thì dùng mặc định xác định.
@@ -640,7 +732,11 @@ class GameState {
   Map<String, dynamic> toJson() => {
     'seed': seed,
     'day': day,
-    'res': {for (final e in res.entries) e.key.name: e.value},
+    // Thứ tự theo enum để JSON ổn định bất kể thứ tự chèn của map (save → load → save phải giống hệt).
+    'res': {
+      for (final r in Res.values)
+        if (res.containsKey(r)) r.name: res[r],
+    },
     'soldiers': [for (final s in soldiers) s.toJson()],
     'nextSoldierId': nextSoldierId,
     'buildings': {for (final e in buildings.entries) e.key.name: e.value},
@@ -664,6 +760,8 @@ class GameState {
     'shops': {for (final e in shops.entries) e.key: e.value.toJson()},
     'visiting': visiting,
     'tradeCount': tradeCount,
+    if (reliefDay >= 0) 'reliefDay': reliefDay,
+    if (nextItemSerial != 0) 'nextItemSerial': nextItemSerial,
     'identity': identity.toJson(),
     'hero': hero.toJson(),
     if (legacy != null) 'legacy': legacy,
@@ -752,9 +850,15 @@ class GameState {
         victory: j['victory'] == true,
         shops: _readShops(j['shops']),
         visiting: j['visiting'] as String?,
+        reliefDay: j['reliefDay'] is int
+            ? intIn(j['reliefDay'], 0, 1 << 30)
+            : -1,
         tradeCount: j['tradeCount'] == null
             ? 0
             : intIn(j['tradeCount'], 0, 1 << 30),
+        nextItemSerial: j['nextItemSerial'] == null
+            ? 0
+            : intIn(j['nextItemSerial'], 0, 1 << 40),
         identity: PlayerIdentity.fromJsonLenient(j['identity']),
         hero: HeroState.fromJsonLenient(
           j['hero'],

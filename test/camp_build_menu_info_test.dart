@@ -49,6 +49,7 @@ double _opacity(WidgetTester t, String id) =>
     t.widget<Opacity>(find.byKey(ValueKey('camp-build-art-$id'))).opacity;
 
 void main() {
+  _costRegression();
   testWidgets('chưa xây: bình thường, mở popup; không có X / nút Xây', (
     t,
   ) async {
@@ -136,3 +137,30 @@ void main() {
 }
 
 CampBuildingDef _def(String id) => campBuildings.firstWhere((d) => d.id == id);
+
+void _costRegression() {
+  for (final sz in _sizes) {
+    testWidgets(
+      'popup chi phí không overflow, hiện tên + số, không chú giải $sz',
+      (t) async {
+        final s = await _open(t, sz);
+        final d = campBuildings.firstWhere(
+          (d) => !GameRules.campStatus(s, d).built,
+        );
+        await t.tap(find.byKey(ValueKey('camp-build-${d.id}')));
+        await t.pumpAndSettle();
+        expect(t.takeException(), isNull);
+        expect(find.byKey(const ValueKey('effect-legend')), findsNothing);
+        expect(find.textContaining('Chú giải'), findsNothing);
+        expect(find.text('Chi phí xây dựng'), findsOneWidget);
+        for (final e in GameRules.campStatus(s, d).cost!.entries) {
+          expect(
+            find.byKey(ValueKey('camp-cost-${e.key.name}')),
+            findsOneWidget,
+          );
+          expect(find.text('${e.value}'), findsWidgets);
+        }
+      },
+    );
+  }
+}

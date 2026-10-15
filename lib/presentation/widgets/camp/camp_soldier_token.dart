@@ -7,6 +7,7 @@ import '../../../domain/models.dart';
 import '../../../domain/stats.dart';
 import '../art.dart';
 import '../common.dart';
+import '../soldier_condition_widgets.dart';
 import 'soldier_info_dialog.dart';
 
 /// Binh sĩ trong trại: kéo-thả vào công trình, chạm để xem thẻ nhanh.
@@ -28,7 +29,11 @@ class CampSoldierToken extends StatelessWidget {
     final sprite = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SoldierSprite.of(soldier, bust: false, size: size),
+        LevelUpMark(
+          show: soldier.statPoints > 0,
+          size: (size * 0.4).clamp(12.0, 18.0),
+          child: SoldierSprite.of(soldier, bust: false, size: size),
+        ),
         SizedBox(
           width: size * 0.9,
           child: Bar(

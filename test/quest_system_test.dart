@@ -1,6 +1,7 @@
 import 'package:app_rising_army/domain/battle.dart';
 import 'package:app_rising_army/domain/stats.dart';
 import 'package:app_rising_army/domain/catalog.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
 import 'package:app_rising_army/domain/world_data.dart';
@@ -116,10 +117,13 @@ void main() {
       final coins = s.res[Res.coins]!;
       final exps = {for (final x in s.roster) x.id: x.xp + x.level * 1000};
       expect(GameRules.completeMission(s, 1).ok, isTrue);
-      expect(s.sacredWill, 50 + t.rewardSat);
-      expect(s.kingSatisfaction, 50 + t.rewardSat);
-      expect(s.res[Res.coins], coins + t.rewardRes[Res.coins]!);
-      expect(s.res[Res.food], 100 - t.amount);
+      expect(s.sacredWill, 50 + QuestEconomy.of(t).sat);
+      expect(s.kingSatisfaction, 50 + QuestEconomy.of(t).sat);
+      expect(s.res[Res.coins], coins + QuestEconomy.of(t).res[Res.coins]!);
+      expect(
+        s.res[Res.food],
+        100 - t.amount,
+      ); // nhiệm vụ nộp lương thực không hoàn lại lương thực
       // Vàng không cộng EXP.
       expect({for (final x in s.roster) x.id: x.xp + x.level * 1000}, exps);
       final m = s.missions.first;
@@ -131,7 +135,7 @@ void main() {
       final loaded = GameState.fromJson(s.toJson());
       expect(GameRules.completeMission(loaded, 1).ok, isFalse);
       expect(loaded.res[Res.coins], snapshot);
-      expect(loaded.sacredWill, 50 + t.rewardSat);
+      expect(loaded.sacredWill, 50 + QuestEconomy.of(t).sat);
     });
 
     test('Thánh ý bị chặn ở 100', () {
@@ -149,7 +153,7 @@ void main() {
       final m = accept(s, 1);
       final t = templateById('clear_bandits');
       expect(t.color, MissionColor.red);
-      expect(t.rewardSat, 0);
+      expect(QuestEconomy.of(t).sat, 0);
       final squad = s.roster.take(3).toList();
       final other = s.roster.last;
       final lvlBefore = {for (final x in squad) x.id: x.level};
@@ -159,10 +163,18 @@ void main() {
       m.progress = 1;
       m.squad.addAll(squad.map((x) => x.id));
       final coins = s.res[Res.coins]!, food = s.res[Res.food]!;
+      final base = {for (final k in rewardResourcePool) k: s.res[k]!};
       final r = GameRules.completeMission(s, 1);
       expect(r.ok, isTrue, reason: r.message);
-      expect(s.res[Res.coins], coins + t.rewardRes[Res.coins]!);
-      expect(s.res[Res.food], food + t.rewardRes[Res.food]!);
+      final q = QuestEconomy.of(t);
+      expect(s.res[Res.coins], coins + q.res[Res.coins]!);
+      // Tài nguyên đa dạng: đúng số loại, chỉ lấy từ pool hợp lệ.
+      expect(s.res[Res.food]!, greaterThanOrEqualTo(food));
+      final gainedKinds = [
+        for (final k in rewardResourcePool)
+          if (s.res[k]! > (k == Res.food ? food : base[k]!)) k,
+      ];
+      expect(gainedKinds.length, q.resourceKinds);
       expect(s.kingSatisfaction, 40); // đỏ không cộng Thánh ý
       expect(
         squad.first.level,
@@ -266,9 +278,11 @@ void main() {
         if (res.battle?.winner != Winner.player) continue;
         expect(m.rewarded, isFalse);
         expect(m.status, isNot(MissionStatus.completed));
+        // Chỉ có chiến lợi phẩm của trận, không có thưởng nhiệm vụ.
+        // Chỉ có chiến lợi phẩm của trận (trừ lương các ngày hành quân), không có thưởng nhiệm vụ.
         expect(
           s.res[Res.coins]! - coins,
-          lessThan(templateById('clear_bandits').rewardRes[Res.coins]!),
+          lessThanOrEqualTo(res.gained[Res.coins]!),
         );
         return;
       }

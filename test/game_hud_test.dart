@@ -113,7 +113,7 @@ void main() {
         '${s.roster.length}/${GameRules.rosterCap(s)}',
       );
       expect(find.text('${s.day}'), findsWidgets);
-      expect(find.text('Ngày'), findsOneWidget);
+      expect(find.text('NGÀY'), findsOneWidget);
       expect(find.text('${s.kingSatisfaction.clamp(0, 100)}'), findsWidgets);
       expect(find.byKey(const ValueKey('hud-flag')), findsOneWidget);
 
@@ -182,7 +182,10 @@ void main() {
         final coins = c.state!.res[Res.coins]!;
         c.setDevMode(true);
         await t.pumpAndSettle();
-        expect(find.text(formatThousands(coins)), findsOneWidget);
+        expect(
+          t.widget<Text>(find.byKey(const ValueKey('hud-amount-coins'))).data,
+          formatThousands(coins),
+        );
         c.setDevMode(false);
       },
     );
@@ -280,7 +283,16 @@ void main() {
           await t.pumpAndSettle();
           final camp = t.getRect(find.byType(CampHub));
           // Vùng vẽ cảnh trại nằm trong CampHub (trừ padding); lấy từ LayoutBuilder qua ClipRRect.
-          final area = t.getRect(find.byType(ClipRRect).first);
+          final clip = t.getRect(find.byType(ClipRRect).first);
+          // Khung thế giới Trại có tỉ lệ cố định và nằm giữa vùng nhìn (CampMetrics.originFor); HUD bám theo khung đó.
+          final worldSize = CampMetrics.worldFor(clip.size);
+          final origin = CampMetrics.originFor(clip.size, worldSize);
+          final area = Rect.fromLTWH(
+            clip.left + origin.dx,
+            clip.top + origin.dy,
+            worldSize.width,
+            worldSize.height,
+          );
           final fence = CampGroundPainter.fenceOf(area.size);
           final top = t.getRect(topHud);
           final res = t.getRect(resHud);

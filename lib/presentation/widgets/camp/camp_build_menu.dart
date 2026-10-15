@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../../domain/building_effects.dart';
 import '../../../domain/catalog.dart';
+import '../../../domain/economy.dart';
 import '../../../domain/models.dart';
 import '../../../domain/rules.dart';
 import '../buildings/buildings.dart';
 import '../common.dart';
 import '../stat_icon.dart';
+import 'building_effect_details.dart';
 import 'camp_drag_handoff.dart';
 
 /// Hình đại diện công trình.
@@ -160,12 +162,17 @@ Future<CampBuildingDef?> showCampBuildMenu(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Bảng thông tin xuất hiện ngay phía trên hàng ô.
+                  // Flexible + cuộn: màn thấp thì bảng cuộn được thay vì tràn.
                   if (popupStatus != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: CampBuildingInfoPopup(
-                        status: popupStatus,
-                        state: s,
+                    Flexible(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: SingleChildScrollView(
+                          child: CampBuildingInfoPopup(
+                            status: popupStatus,
+                            state: s,
+                          ),
+                        ),
                       ),
                     ),
 
@@ -293,7 +300,9 @@ class CampBuildingInfoPopup extends StatelessWidget {
     if (f.type == FacilityType.barracks) {
       return GameRules.upgradeCost(s, Building.barracks);
     }
-    return f.level < Facility.maxLevel ? facilityUpgradeCosts[f.type] : null;
+    return f.level < Facility.maxLevel
+        ? ConstructionEconomy.slotUpgradeCost(f.type)
+        : null;
   }
 
   static const Color _ink = Color(0xFF493321);
@@ -343,13 +352,21 @@ class CampBuildingInfoPopup extends StatelessWidget {
             const SizedBox(height: 6),
             BuildingEffectIcons(displayEffectsOf(d.facility!)),
             const SizedBox(height: 2),
+            BuildingEffectDetails(
+              d.facility!,
+              level: facility?.level ?? 1,
+              assigned: [
+                for (final id in facility?.assigned ?? const <int>[])
+                  ?state.soldier(id),
+              ],
+            ),
             if (facility == null)
               _detailRow(Icons.grid_view_rounded, 'Slot', '1 ô', _ink)
             else if (GameRules.takesAssignment(facility!.type))
               _detailRow(
                 Icons.grid_view_rounded,
                 'Slot',
-                '${facility!.assigned.length}/${facility!.slots}',
+                '${facility!.assigned.length}/${GameRules.slotsOf(state, facility!)}',
                 _ink,
               )
             else if (facility!.type == FacilityType.barracks)
@@ -363,9 +380,9 @@ class CampBuildingInfoPopup extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               facility == null ? 'Chi phí xây dựng' : 'Chi phí nâng cấp',
-              style: TextStyle(
+              style: const TextStyle(
                 color: _ink,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -373,7 +390,7 @@ class CampBuildingInfoPopup extends StatelessWidget {
                     ? status.cost
                     : upgradeCostOf(state, facility!)) !=
                 null)
-              CostText(
+              _PopupCost(
                 (facility == null
                     ? status.cost
                     : upgradeCostOf(state, facility!))!,
@@ -434,4 +451,58 @@ class CampBuildingInfoPopup extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Chi phí trên nền giấy sáng của popup: chữ tối đậm, đủ/thiếu phân biệt bằng màu + đậm.
+class _PopupCost extends StatelessWidget {
+  const _PopupCost(this.cost, {required this.state});
+  final Cost cost;
+  final GameState state;
+
+  static const Color _ink = Color(0xFF2E1D0E);
+  static const Color _short = Color(0xFF9A3028);
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 3,
+      children: [
+        for (final e in cost.entries)
+          Builder(
+            builder: (_) {
+              final ok = GameRules.canAfford(state, {e.key: e.value});
+              final color = ok ? _ink : _short;
+              return Row(
+                key: ValueKey('camp-cost-${e.key.name}'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(resIcons[e.key], size: 15, color: _goldDark(ok)),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${resNames[e.key]} ',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    '${e.value}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  static Color _goldDark(bool ok) =>
+      ok ? const Color(0xFF76501C) : const Color(0xFF9A3028);
 }

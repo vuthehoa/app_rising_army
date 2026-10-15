@@ -234,42 +234,63 @@ class _BattleScreenState extends State<BattleScreen> {
                         ),
                       ),
                       if (wide)
+                        // Màn rộng: nhật ký + đơn vị đang chọn + điều khiển nằm gọn ở cột phải, nhờ đó chiến
+                        // trường (bị giới hạn bởi chiều cao) được thêm trọn dải thanh dưới.
                         Container(
+                          key: const ValueKey('battle-side-panel'),
                           width: 220,
                           color: Pal.panel,
-                          child: logPanel,
+                          child: Column(
+                            children: [
+                              Expanded(child: logPanel),
+                              const Divider(height: 1, color: Pal.line),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _selectedInfo(hpOf),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      alignment: WrapAlignment.end,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      runSpacing: 4,
+                                      children: _controls(wide),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                     ],
                   ),
                 ),
-                // Thanh dưới: đơn vị đang chọn + điều khiển. Màn hẹp tách thành hai hàng.
-                Container(
-                  color: Pal.panel,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  child: wide
-                      ? Row(
-                          children: [
-                            Expanded(child: _selectedInfo(hpOf)),
-                            ..._controls(wide),
-                          ],
-                        )
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: _selectedInfo(hpOf),
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: _controls(wide),
-                            ),
-                          ],
+                // Thanh dưới (chỉ màn hẹp): đơn vị đang chọn + điều khiển tách thành hai hàng.
+                if (!wide)
+                  Container(
+                    color: Pal.panel,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _selectedInfo(hpOf),
                         ),
-                ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: _controls(wide),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             );
           },
@@ -301,9 +322,12 @@ class _BattleScreenState extends State<BattleScreen> {
           child: ChoiceChip(
             label: Text('x$v'),
             selected: speed == v,
-            visualDensity: VisualDensity.compact,
+            visualDensity: wide ? null : VisualDensity.compact,
             labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            // Màn rộng còn chỗ: vùng chạm chuẩn 48 pt; màn hẹp giữ gọn.
+            materialTapTargetSize: wide
+                ? MaterialTapTargetSize.padded
+                : MaterialTapTargetSize.shrinkWrap,
             onSelected: (_) => setState(() => speed = v),
           ),
         ),
@@ -433,25 +457,62 @@ class _BattleScreenState extends State<BattleScreen> {
                                             )
                                           : null,
                                     ),
-                                    child: SoldierSprite(
-                                      role: u.role,
-                                      seed: id.abs(),
-                                      armorId: u.armorId,
-                                      weaponId: u.weaponId,
-                                      bust: false,
-                                      enemy: !player,
-                                      down: dead,
-                                      size: spr,
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      alignment: Alignment.bottomCenter,
+                                      children: [
+                                        // Vòng chân theo phe (xanh = quân ta, đỏ = địch): nhìn ra phe ngay cả khi
+                                        // giáp giống nhau. Chỉ là hình vẽ, không phải dữ liệu.
+                                        if (!dead)
+                                          Positioned(
+                                            bottom: -spr * 0.04,
+                                            left: spr * 0.04,
+                                            right: spr * 0.04,
+                                            height: spr * 0.26,
+                                            child: DecoratedBox(
+                                              key: ValueKey('battle-ring-$id'),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color:
+                                                    (player
+                                                            ? Pal.moss
+                                                            : Pal.blood)
+                                                        .withValues(
+                                                          alpha: 0.28,
+                                                        ),
+                                                border: Border.all(
+                                                  color: player
+                                                      ? Pal.moss
+                                                      : Pal.blood,
+                                                  width: 1.5,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        SoldierSprite(
+                                          role: u.role,
+                                          seed: id.abs(),
+                                          armorId: u.armorId,
+                                          weaponId: u.weaponId,
+                                          bust: false,
+                                          enemy: !player,
+                                          down: dead,
+                                          size: spr,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
                                 if (!dead)
                                   SizedBox(
-                                    width: spr * 0.8,
+                                    width: spr * 0.9,
                                     child: Bar(
                                       value: hp / u.maxHp,
-                                      color: player ? Pal.moss : Pal.blood,
-                                      height: 3,
+                                      // Máu thấp (≤ 30%) đổi sang màu hổ phách để dễ thấy; màu phe vẫn ở vòng chân.
+                                      color: hp / u.maxHp <= 0.3
+                                          ? const Color(0xFFFFB02E)
+                                          : (player ? Pal.moss : Pal.blood),
+                                      height: 4,
                                     ),
                                   ),
                               ],
@@ -461,6 +522,34 @@ class _BattleScreenState extends State<BattleScreen> {
                       );
                     },
                   ),
+                // Chớp nhẹ ở mục tiêu vừa trúng đòn (chỉ đọc sự kiện của báo cáo trận).
+                for (final e in recent)
+                  if (e.hit && (t - e.t) < 0.25)
+                    Builder(
+                      builder: (context) {
+                        final fa = br.a.units[e.target]!;
+                        final k = 1 - (t - e.t) / 0.25;
+                        return Positioned(
+                          left: fa.x * scale - spr * 0.55,
+                          top: fa.y * scale - spr * 0.55,
+                          child: IgnorePointer(
+                            child: Container(
+                              key: ValueKey('battle-hit-${e.target}'),
+                              width: spr * 1.1,
+                              height: spr * 1.1,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color:
+                                    (e.crit
+                                            ? Pal.goldLight
+                                            : const Color(0xFFFFFFFF))
+                                        .withValues(alpha: 0.4 * k),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                 for (final e in recent)
                   Builder(
                     builder: (context) {
@@ -477,9 +566,11 @@ class _BattleScreenState extends State<BattleScreen> {
                                   ? '${e.crit ? '!' : ''}-${e.damage}'
                                   : 'Miss',
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: e.crit ? 14 : 11,
                                 fontWeight: FontWeight.w900,
-                                color: e.hit ? Colors.white : Pal.steel,
+                                color: e.hit
+                                    ? (e.crit ? Pal.goldLight : Colors.white)
+                                    : Pal.steel,
                                 shadows: const [Shadow(blurRadius: 3)],
                               ),
                             ),

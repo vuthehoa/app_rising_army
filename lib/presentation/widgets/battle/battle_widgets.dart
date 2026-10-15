@@ -101,7 +101,7 @@ class SoldierStatLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final so = soldier;
     final d = deriveStats(so);
-    final weapon = so.weaponId == null ? null : itemDefs[so.weaponId]?.name;
+    final weapon = so.weaponId == null ? null : itemDisplayName(so.weaponId!);
     final type = d.weaponType == null
         ? 'Tay không'
         : weaponProfiles[d.weaponType]!.name;
@@ -140,7 +140,7 @@ class SoldierStatLine extends StatelessWidget {
           runSpacing: 2,
           children: [
             chip(Icons.favorite, '${startHpOf(so)}/${d.maxHp}'),
-            chip(Icons.flash_on, d.attack.toStringAsFixed(1)),
+            chip(Icons.flash_on, d.damageRange),
             chip(Icons.shield, '${(d.reduction * 100).round()}%'),
             chip(Icons.straighten, '${d.range.toStringAsFixed(1)}m'),
             chip(Icons.timer, '${d.interval.toStringAsFixed(1)}s'),

@@ -159,14 +159,15 @@ void main() {
   });
 
   group('Buff/debuff công trình', () {
-    test('Bãi đá hiện đốm lửa ++ (chỉ hiển thị); Bãi bắn cung không còn icon cánh tay; gameplay giữ nguyên', () {
+    test('Bãi đá: đốm lửa ++ là hiệu ứng THẬT (Tinh thần); Bãi bắn cung không còn icon cánh tay; gameplay giữ nguyên', () {
       final stone = displayEffectsOf(FacilityType.enduranceYard);
       expect(stone.single.stat, EffectStat.morale); // ngọn lửa
       expect(stone.single.level, EffectLevel.strongUp);
       expect(
-        effectsOf(FacilityType.enduranceYard),
-        isEmpty,
-      ); // gameplay không đổi
+        effectsOf(FacilityType.enduranceYard).single.stat,
+        EffectStat.morale,
+        reason: 'hiển thị = gameplay',
+      );
       final archery = displayEffectsOf(FacilityType.archeryRange);
       expect(archery.any((e) => e.stat == EffectStat.strength), isFalse);
       expect(archery.map((e) => (e.stat, e.level)), [
@@ -179,7 +180,7 @@ void main() {
         isTrue,
       );
       for (final t in FacilityType.values) {
-        if (t == FacilityType.enduranceYard || t == FacilityType.archeryRange) {
+        if (t == FacilityType.archeryRange) {
           continue;
         }
         expect(displayEffectsOf(t), effectsOf(t), reason: t.name);

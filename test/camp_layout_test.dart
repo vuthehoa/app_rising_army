@@ -1,5 +1,6 @@
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/camp_layout.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
@@ -425,7 +426,8 @@ void main() {
         expect(ghost, findsNothing);
         expect(
           c.state!.res[Res.coins],
-          coins - facilityDefs[FacilityType.meleeYard]!.cost[Res.coins]!,
+          coins -
+              ConstructionEconomy.buildCost(FacilityType.meleeYard)[Res.coins]!,
         );
         // Công trình hiển thị đúng chỗ đã thả.
         final shown = t.getCenter(find.byKey(ValueKey('facility-${f.id}')));

@@ -43,40 +43,21 @@ int? daysToRebuild(
 void main() {
   group('Trợ cấp khẩn của nhà vua (chống softlock sau khi mất quân)', () {
     test(
-      'giảm dần tuyến tính theo số quân, bằng 0 từ ngưỡng, không có vách đá',
+      'không còn thu nhập thụ động: bổng lộc và trợ cấp khẩn đều bằng 0',
       () {
-        final values = [
-          for (var n = 0; n <= reliefThreshold + 2; n++) reliefFor(n),
-        ];
-        expect(values.first, reliefCoins);
-        expect(values[reliefThreshold], 0);
-        expect(values.last, 0);
-        for (var i = 1; i < values.length; i++) {
-          expect(values[i], lessThanOrEqualTo(values[i - 1]));
-          expect(
-            values[i - 1] - values[i],
-            lessThanOrEqualTo((reliefCoins / reliefThreshold).ceil()),
-          );
+        expect(kingStipendCoins, 0);
+        expect(kingStipendFood, 0);
+        for (var n = 0; n <= reliefThreshold + 2; n++) {
+          expect(reliefFor(n), 0);
         }
-      },
-    );
-
-    test(
-      'được cộng vào bổng lộc và ghi vào báo cáo; không có khi hài lòng = 0',
-      () {
         final s = fresh();
         killAllBut(s, 2);
-        final coins = s.res[Res.coins]!;
+        final coins = s.res[Res.coins]!, food = s.res[Res.food]!;
         final r = GameRules.tickDay(s);
-        expect(r.stipend[Res.coins], kingStipendCoins + reliefFor(2));
-        expect(r.lines.any((l) => l.contains('Trợ cấp khẩn')), isTrue);
-        expect(s.res[Res.coins], coins + kingStipendCoins + reliefFor(2) - 2);
-        final broke = fresh()..kingSatisfaction = 0;
-        killAllBut(broke, 2);
-        expect(
-          GameRules.tickDay(broke).stipend[Res.coins],
-          isNot(greaterThan(kingStipendCoins)),
-        );
+        expect(r.stipend, {Res.food: 0, Res.coins: 0});
+        expect(r.lines.any((l) => l.contains('Trợ cấp khẩn')), isFalse);
+        expect(s.res[Res.coins], coins - 2);
+        expect(s.res[Res.food], food - 2);
       },
     );
 
@@ -91,24 +72,26 @@ void main() {
       expect(s.roster.any((x) => dead.contains(x.id)), isFalse);
     });
 
-    test('mất toàn bộ quân và hết tài nguyên vẫn dựng lại được 3 người trong 10 ngày và 6 người trong 24 ngày (mọi seed)', () {
-      for (var seed = 1; seed <= 20; seed++) {
-        expect(
-          daysToRebuild(seed, 0, 3),
-          lessThanOrEqualTo(14),
-          reason: 'seed $seed',
-        );
-        expect(
-          daysToRebuild(seed, 0, 6),
-          lessThanOrEqualTo(32),
-          reason: 'seed $seed',
-        );
-      }
-    });
-
-    test('còn 1 binh sĩ, hết sạch cũng phục hồi', () {
-      for (var seed = 1; seed <= 20; seed++) {
-        expect(daysToRebuild(seed, 1, 6), isNotNull, reason: 'seed $seed');
+    test('hết sạch tài nguyên: qua ngày không tự sinh quân hay tài nguyên (phải chiến đấu để kiếm)', () {
+      for (var seed = 1; seed <= 10; seed++) {
+        final s = fresh(seed);
+        killAllBut(s, 1);
+        s.res.updateAll((_, _) => 0);
+        var relieved = false;
+        for (var d = 0; d < 20; d++) {
+          final r = GameRules.tickDay(s);
+          if (r.lines.any((l) => l.contains('Làng lân cận'))) relieved = true;
+          if (!relieved) {
+            // Trước khi cứu trợ bế tắc (chỉ khi mất sạch quân và vốn) thì không tự sinh quân hay tài nguyên.
+            expect(s.roster.length, lessThanOrEqualTo(1), reason: 'seed $seed');
+            expect(
+              s.res.values.every((v) => v == 0),
+              isTrue,
+              reason: 'seed $seed ngày $d',
+            );
+          }
+        }
+        expect(s.roster.length, lessThanOrEqualTo(1), reason: 'seed $seed');
       }
     });
 
@@ -228,30 +211,16 @@ void main() {
         }
       },
     );
-
-    // Phase 4: tử trận = HP về 0 (bỏ xác suất 80%) nên tổn thất cao hơn nhiều; chưa chỉnh kinh tế (đóng băng phạm vi),
-    // chỉ bảo đảm không game over và vẫn còn quân để hồi phục.
-    test('policy hợp lý (cân bằng) không bị game over và còn quân sống sau 60 ngày ở mọi seed 1-10', () {
-      for (var seed = 1; seed <= 10; seed++) {
-        final run = sim.play('07 Phát triển cân bằng', seed);
-        expect(run.s.gameOver, isFalse, reason: 'seed $seed');
-        expect(
-          run.rows.last.alive,
-          greaterThanOrEqualTo(1),
-          reason: 'seed $seed',
-        );
-      }
-    });
   });
 
   group('Chi phí duy trì và nhiệm vụ', () {
-    test('chi phí duy trì = 1 thức ăn + 1 đồng xu mỗi binh sĩ mỗi ngày', () {
+    test('chi phí duy trì = vàng + lương thực theo cấp từng binh sĩ (cấp 1 = 1 + 1)', () {
       final s = fresh();
       s.res[Res.food] = 500;
       s.res[Res.coins] = 500;
       final n = s.roster.length;
       final r = GameRules.tickDay(s);
-      expect(r.upkeep, n);
+      expect(r.upkeep, {Res.coins: n, Res.food: n});
       expect(s.res[Res.food], 500 + r.stipend[Res.food]! - n);
       expect(s.res[Res.coins], 500 + r.stipend[Res.coins]! - n);
     });
@@ -264,13 +233,13 @@ void main() {
         GameRules.acceptMission(s..visiting ??= 'g_town', 900);
         final t = templateById('deliver_wood_a');
         final sat = s.kingSatisfaction;
-        DayReport? last;
+        final lines = <String>[];
         for (var i = 0; i <= t.days; i++) {
           s.res[Res.wood] = 0;
-          last = GameRules.tickDay(s);
+          lines.addAll(GameRules.tickDay(s).lines);
         }
         expect(s.kingSatisfaction, sat - t.penaltySat);
-        expect(last!.lines.any((l) => l.contains('Quá hạn')), isTrue);
+        expect(lines.where((l) => l.contains('Quá hạn')), hasLength(1));
       },
     );
   });

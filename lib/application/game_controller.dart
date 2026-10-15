@@ -40,6 +40,21 @@ class GameController extends ChangeNotifier {
 
   GameState? get state => _state;
 
+  /// Trạng thái thu gọn của HUD (chỉ giao diện: không vào save, không đổi GameState). Nằm ở controller dùng chung nên
+  /// giữ nguyên khi chuyển giữa Trại / Bản đồ / Thành phố và khi widget dựng lại — HUD không tự mở lại.
+  bool _hudLeftCollapsed = false;
+  bool _hudTopCollapsed = false;
+  bool get hudLeftCollapsed => _hudLeftCollapsed;
+  bool get hudTopCollapsed => _hudTopCollapsed;
+
+  void setHudCollapsed({bool? left, bool? top}) {
+    final l = left ?? _hudLeftCollapsed, t = top ?? _hudTopCollapsed;
+    if (l == _hudLeftCollapsed && t == _hudTopCollapsed) return;
+    _hudLeftCollapsed = l;
+    _hudTopCollapsed = t;
+    notifyListeners();
+  }
+
   /// Điều phối đi bộ trên bản đồ khám phá. Vị trí/thể lực nằm ở [GameState.hero].
   late final HeroTravel travel = HeroTravel(() => _state, commitTravel);
 
@@ -319,8 +334,12 @@ class GameController extends ChangeNotifier {
 
   ActionResult buildFacility(FacilityType type, int slot) =>
       _apply(() => GameRules.buildFacility(_state!, type, slot));
-  ActionResult equip(int id, String item) =>
-      _apply(() => GameRules.equip(_state!, id, item));
+  ActionResult equip(int id, String item, {Slot? slot}) =>
+      _apply(() => GameRules.equip(_state!, id, item, slot: slot));
+
+  /// Cộng 1 điểm chỉ số chưa dùng của binh sĩ vào [stat] (xem `GameRules.allocateStat`).
+  ActionResult allocateStat(int id, MainStat stat) =>
+      _apply(() => GameRules.allocateStat(_state!, id, stat));
   ActionResult unequip(int id, Slot slot) =>
       _apply(() => GameRules.unequip(_state!, id, slot));
   ActionResult buy(String item) => _apply(() => GameRules.buy(_state!, item));
@@ -339,10 +358,10 @@ class GameController extends ChangeNotifier {
       _apply(() => GameRules.buyAndEquip(_state!, vendor, item, soldier));
   ActionResult sellToVendor(String vendor, String item, int qty) =>
       _apply(() => GameRules.sellToVendor(_state!, vendor, item, qty));
-  ActionResult buyResourceLots(String vendor, Res res, int lots) =>
-      _apply(() => GameRules.buyResourceLots(_state!, vendor, res, lots));
-  ActionResult sellResourceLots(String vendor, Res res, int lots) =>
-      _apply(() => GameRules.sellResourceLots(_state!, vendor, res, lots));
+  ActionResult buyResource(String vendor, Res res, int qty) =>
+      _apply(() => GameRules.buyResource(_state!, vendor, res, qty));
+  ActionResult sellResource(String vendor, Res res, int qty) =>
+      _apply(() => GameRules.sellResource(_state!, vendor, res, qty));
   ActionResult leaveCity() => _apply(() => GameRules.leaveCity(_state!));
 
   /// Logic qua ngày (lương, huấn luyện, hồi phục, sự kiện). KHÔNG còn được UI gọi: người chơi không
@@ -354,12 +373,36 @@ class GameController extends ChangeNotifier {
     return r;
   }
 
+  bool _dayBusy = false;
+
+  /// Nút "Qua ngày" của Camp: qua đúng MỘT ngày rồi lưu. Bấm lặp (double tap, callback lặp) trong lúc lần trước
+  /// chưa lưu xong bị bỏ qua, nên không bao giờ tính upkeep hai lần. Luôn nhả khóa kể cả khi lưu lỗi.
+  /// Trả về null nếu bị chặn (đang xử lý, chưa có ván, ván đã kết thúc).
+  Future<DayReport?> advanceDay() async {
+    final s = _state;
+    if (_dayBusy || s == null || s.gameOver || s.victory) return null;
+    _dayBusy = true;
+    try {
+      final r = GameRules.tickDay(s);
+      lastDayReport = r;
+      notifyListeners();
+      await _persist();
+      return r;
+    } finally {
+      _dayBusy = false;
+    }
+  }
+
+  /// Đang xử lý một lần qua ngày (UI dùng để khóa nút).
+  bool get dayBusy => _dayBusy;
+
   ExpeditionResult sendExpedition(
     String loc,
     List<int> squad,
     Set<int> front, {
     Map<int, Pos>? placement,
   }) {
+    final dayBefore = _state!.day;
     final r = GameRules.sendExpedition(
       _state!,
       loc,
@@ -369,6 +412,10 @@ class GameController extends ChangeNotifier {
     );
     if (r.result.ok) {
       lastExpedition = r;
+      _afterChange();
+    } else if (_state!.day != dayBefore) {
+      // Chuyến đi thất bại SAU khi đã qua ngày hành quân (ví dụ nhiệm vụ hết hạn trên đường): state đã đổi thật nên
+      // phải báo UI và lưu, nếu không giao diện lệch state và lần lưu sau mới ghi lại.
       _afterChange();
     }
     return r;

@@ -82,7 +82,7 @@ class MissionsScreen extends StatelessWidget {
                 const SizedBox(width: 12),
                 Flexible(
                   child: Text(
-                    'Bổng lộc/ngày: ${(kingStipendFood * factor).round()} lương thực, ${(kingStipendCoins * factor).round()} vàng • Hoàn thành: ${s.missionsCompleted} • Chương ${s.tier + 1}/4',
+                    'Hoàn thành: ${s.missionsCompleted} • Chương ${s.tier + 1}/4${kingStipendCoins + kingStipendFood > 0 ? ' • Bổng lộc/ngày: ${(kingStipendFood * factor).round()} lương thực, ${(kingStipendCoins * factor).round()} vàng' : ''}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),

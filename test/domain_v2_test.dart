@@ -1,3 +1,5 @@
+import 'package:app_rising_army/domain/quest_generator.dart';
+
 import 'dart:convert';
 
 import 'support/built_camp.dart';
@@ -6,10 +8,13 @@ import 'dart:math';
 
 import 'package:app_rising_army/data/migration_v1_v3.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/combat_condition.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/battle.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
+import 'package:app_rising_army/domain/stat_formulas.dart';
 import 'package:app_rising_army/domain/stats.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -55,9 +60,12 @@ void main() {
       final s = fresh();
       final c = s.candidates.first;
       final coins = s.res[Res.coins]!;
+      // Giá niêm yết lúc xem ứng viên (chưa có đồ); chiêu mộ xong lính được cấp áo giáp + vũ khí miễn phí nên giá
+      // tính lại SAU khi chiêu mộ (đã gồm giá trị đồ) không còn là số vàng thực trả.
+      final cost = GameRules.hireCost(c);
       expect(GameRules.hire(s, c.id).ok, isTrue);
       expect(s.soldier(c.id), same(c));
-      expect(s.res[Res.coins], coins - GameRules.hireCost(c));
+      expect(s.res[Res.coins], coins - cost);
       expect(s.candidates.any((x) => x.id == c.id), isFalse);
       s.res[Res.coins] = 99999;
       while (s.roster.length < GameRules.rosterCap(s)) {
@@ -80,8 +88,6 @@ void main() {
       expect(geared.attack, greaterThan(bare.attack));
       expect(geared.defense, greaterThan(bare.defense));
       expect(geared.maxHp, bare.maxHp);
-      so.accessoryId = 'saint_amulet';
-      expect(deriveStats(so).maxHp, bare.maxHp + 6); // +2 thể trạng x 3
     });
 
     test('đặc điểm tác động đúng', () {
@@ -131,21 +137,40 @@ void main() {
 
     test('equip: chuyển vật phẩm kho <-> binh sĩ, hoán đổi đồ cũ', () {
       final s = fresh();
-      final so = s.roster.firstWhere((x) => x.role == Role.spearman);
-      expect(GameRules.equip(s, so.id, 'iron_ring').ok, isTrue);
-      expect(so.accessoryId, 'iron_ring');
-      expect(s.inventory['iron_ring'], 0);
+      final so = s.roster.firstWhere((x) => x.role == Role.spearman)..level = 6;
+      so.stats[Stat.str] = 20;
+      s.inventory['chain_mail'] = 1;
+      s.inventory['leather_armor'] = 1;
+      final worn = so.armorId!;
+      expect(GameRules.equip(s, so.id, 'chain_mail').ok, isTrue);
+      expect(so.armorId, 'chain_mail');
+      expect(s.inventory['chain_mail'], 0);
+      expect(s.inventory[worn], greaterThan(0), reason: 'đồ cũ về kho');
       expect(
-        GameRules.equip(s, so.id, 'iron_ring').ok,
+        GameRules.equip(s, so.id, 'chain_mail').ok,
         isFalse,
       ); // hết trong kho
-      s.inventory['lucky_charm'] = 1;
-      GameRules.equip(s, so.id, 'lucky_charm');
-      expect(s.inventory['iron_ring'], 1); // đồ cũ về kho
-      expect(GameRules.unequip(s, so.id, Slot.accessory).ok, isTrue);
-      expect(s.inventory['lucky_charm'], 1);
-      expect(GameRules.unequip(s, so.id, Slot.accessory).ok, isFalse);
+      expect(GameRules.equip(s, so.id, 'leather_armor').ok, isTrue);
+      expect(s.inventory['chain_mail'], 1); // đồ cũ về kho
+      expect(GameRules.unequip(s, so.id, Slot.armor).ok, isTrue);
+      expect(s.inventory['leather_armor'], 1);
+      expect(GameRules.unequip(s, so.id, Slot.armor).ok, isFalse);
     });
+
+    test(
+      'chỉ có ba ô trang bị: Giáp, Khiên, Vũ khí; game mới không sinh bùa/nhẫn',
+      () {
+        expect(
+          Slot.values,
+          unorderedEquals([Slot.armor, Slot.shield, Slot.weapon]),
+        );
+        final s = GameRules.newGame(seed: 3);
+        for (final id in s.inventory.keys) {
+          expect(id, isNot(anyOf('lucky_charm', 'iron_ring')));
+          expect(itemDefs[id]!.slot, isIn(Slot.values));
+        }
+      },
+    );
 
     test(
       'equip: kiểm tra cấp độ và sức mạnh yêu cầu; không khóa theo nghề',
@@ -195,9 +220,15 @@ void main() {
       expect(GameRules.buy(s, 'chain_mail').ok, isFalse); // bậc 2, lò rèn cấp 1
       final before = s.res[Res.coins]!;
       expect(GameRules.buy(s, 'leather_armor').ok, isTrue);
-      expect(s.res[Res.coins], before - 35);
+      expect(
+        s.res[Res.coins],
+        before - GameRules.itemPrice(s, itemDefs['leather_armor']!),
+      );
       s.buildings[Building.smithy] = 3;
-      expect(GameRules.itemPrice(s, itemDefs['chain_mail']!), 81); // giảm 10%
+      expect(
+        GameRules.itemPrice(s, itemDefs['chain_mail']!),
+        (itemDefs['chain_mail']!.price * 0.9).round(),
+      ); // giảm 10%
       expect(GameRules.buy(s, 'chain_mail').ok, isTrue);
       s.res[Res.coins] = 0;
       expect(GameRules.buy(s, 'chain_mail').ok, isFalse);
@@ -248,12 +279,21 @@ void main() {
       for (var i = 0; i < 3; i++) {
         GameRules.tickDay(s);
       }
-      expect(so.train[Stat.str], 3 * trainPercentPerDay);
+      expect(
+        so.train[Stat.str],
+        3 * 25,
+        reason: 'Bãi cận chiến: Sức mạnh ++ = 25%/ngày',
+      );
+      expect(so.train[Stat.con], 3 * 15, reason: 'Thể hình + = 15%/ngày');
       expect(so.stats[Stat.str], str);
       GameRules.tickDay(s);
       expect(so.stats[Stat.str], str + 1);
       expect(so.train[Stat.str], 0);
-      expect(so.xp, trainingXp);
+      expect(
+        so.xp,
+        0,
+        reason: 'huấn luyện không cho XP: XP chỉ đến từ chiến đấu',
+      );
       expect(so.stats[Stat.dex], dex);
       expect(so.train[Stat.dex], 0);
     });
@@ -275,8 +315,11 @@ void main() {
         final bow = fac(s, FacilityType.archeryRange);
         GameRules.assignToFacility(s, q.id, bow.id);
         GameRules.tickDay(s);
-        expect(q.train[Stat.str], (trainPercentPerDay * 1.3).round());
-        q.stats[Stat.str] = GameRules.statCap(q);
+        expect(q.train[Stat.dex], (25 * 1.3).round()); // ++ của Bãi bắn cung
+        expect(q.train[Stat.str], (15 * 1.3).round()); // +
+        for (final st in Stat.values) {
+          q.stats[st] = GameRules.statCap(q);
+        }
         GameRules.tickDay(s);
         expect(bow.assigned.contains(q.id), isFalse);
         expect(
@@ -298,7 +341,10 @@ void main() {
       );
       expect(
         s.res[Res.wood],
-        wood - facilityDefs[FacilityType.enduranceYard]!.cost[Res.wood]!,
+        wood -
+            ConstructionEconomy.buildCost(
+              FacilityType.enduranceYard,
+            )[Res.wood]!,
       );
       expect(
         GameRules.buildFacility(s, FacilityType.meleeYard, free.first).ok,
@@ -350,7 +396,9 @@ void main() {
       final up = GameRules.addXp(a, xpForNext(1));
       expect(up, 1);
       expect(a.level, 2);
-      expect(a.stats[Stat.dex]! + a.stats[Stat.str]!, 11);
+      // Lên cấp cho đúng 1 điểm chưa phân bổ, không tự tăng chỉ số.
+      expect(a.stats[Stat.dex]! + a.stats[Stat.str]!, 10);
+      expect(a.statPoints, 1);
       final q = Soldier(
         id: 801,
         name: 'q',
@@ -576,13 +624,14 @@ void main() {
     BattleReport reportWith(
       Map<int, UnitOutcome> outcomes, {
       Winner w = Winner.player,
+      List<UnitSnap> enemies = const [],
     }) => BattleReport(
       winner: w,
       duration: 20,
       frames: const [],
       events: const [],
       playerUnits: const [],
-      enemyUnits: const [],
+      enemyUnits: enemies,
       outcomes: outcomes,
     );
 
@@ -669,17 +718,37 @@ void main() {
       ], reportWith({so.id: UnitOutcome(0, so.maxHp, true, 2)}));
       expect(s.facilities.any((f) => f.assigned.contains(so.id)), isFalse);
       final t = s.roster.first;
-      GameRules.applyBattle(s, [
-        t,
-      ], reportWith({t.id: UnitOutcome(t.maxHp, t.maxHp, false, 2)}));
-      expect(t.kills, 2);
-      expect(
-        t.xp + 20 * (t.level - 1) * t.level ~/ 2,
-        greaterThanOrEqualTo(12 + 10 + 15),
+      GameRules.applyBattle(
+        s,
+        [t],
+        reportWith(
+          {
+            t.id: UnitOutcome(t.maxHp, t.maxHp, false, 2, dealt: {-1: 50}),
+          },
+          enemies: [
+            (
+              id: -1,
+              name: 'e',
+              role: Role.spearman,
+              maxHp: 50,
+              level: 2,
+              armorId: null,
+              weaponId: null,
+              ranged: false,
+            ),
+          ],
+        ),
       );
+      expect(t.kills, 2);
+      // XP chỉ theo sát thương hợp lệ: hạ trọn một địch cấp 2 = enemyXpValue(2).
+      var gained = t.xp;
+      for (var l = 1; l < t.level; l++) {
+        gained += xpForNext(l);
+      }
+      expect(gained, enemyXpValue(2));
     });
 
-    test('hồi phục: nghỉ ngơi 10%/ngày, lều cứu thương 20 HP/ngày, không vượt HP tối đa', () {
+    test('hồi phục: chỉ Lều cứu thương hồi HP (20/ngày), ngoài công trình KHÔNG tự hồi', () {
       final s = fresh();
       final a = s.roster[0], b = s.roster[1];
       a.hp = 1;
@@ -690,12 +759,12 @@ void main() {
         s.facilities.firstWhere((f) => f.type == FacilityType.infirmary).id,
       );
       GameRules.tickDay(s);
-      expect(a.hp, 1 + max(1, (a.maxHp * restHealFraction).round()));
+      expect(a.hp, 1, reason: 'không nằm trong công trình hồi phục');
       expect(b.hp, 21);
       for (var i = 0; i < 12; i++) {
         GameRules.tickDay(s);
       }
-      expect(a.hp, a.maxHp);
+      expect(a.hp, 1, reason: 'qua nhiều ngày vẫn không tự hồi');
       expect(b.hp, b.maxHp);
     });
 
@@ -732,13 +801,17 @@ void main() {
       );
       expect(other.morale, lessThan(m0));
       final s2 = fresh();
-      final w = s2.roster.first..morale = 50;
+      final w = s2.roster.first;
+      w.morale = moraleCap(w) ~/ 2;
+      final w0 = w.morale;
       GameRules.applyBattle(s2, [
         w,
       ], reportWith({w.id: UnitOutcome(w.maxHp, w.maxHp, false, 0)}));
-      expect(w.morale, 58);
+      expect(w.morale, w0 + scaleVital(8, moraleCap(w)));
       final s3 = fresh();
-      final l = s3.roster.first..morale = 50;
+      final l = s3.roster.first;
+      l.morale = moraleCap(l) ~/ 2;
+      final l0 = l.morale;
       GameRules.applyBattle(
         s3,
         [l],
@@ -746,7 +819,7 @@ void main() {
           l.id: UnitOutcome(l.maxHp, l.maxHp, false, 0),
         }, w: Winner.enemy),
       );
-      expect(l.morale, 40);
+      expect(l.morale, l0 + scaleVital(-10, moraleCap(l)));
       expect(s3.battlesLost, 1);
     });
   });
@@ -759,16 +832,13 @@ void main() {
         ..[Res.coins] = 100;
       final r = GameRules.tickDay(s);
       expect(r.paid, isTrue);
-      expect(r.upkeep, 6);
+      expect(r.upkeep, {Res.coins: 6, Res.food: 6});
       expect(s.res[Res.food], 100 + kingStipendFood - 6);
       expect(s.res[Res.coins], 100 + kingStipendCoins - 6);
       expect(s.day, 2);
+      // Không có thu nhập thụ động: qua ngày không cộng bổng lộc dù uy tín cao.
       final hi = fresh()..kingSatisfaction = 100;
-      final lo = fresh()..kingSatisfaction = 10;
-      expect(
-        GameRules.tickDay(hi).stipend[Res.food]!,
-        greaterThan(GameRules.tickDay(lo).stipend[Res.food]!),
-      );
+      expect(GameRules.tickDay(hi).stipend, {Res.food: 0, Res.coins: 0});
     });
 
     test('không trả được lương: tinh thần giảm, tài nguyên không âm; kiệt tinh thần thì đào ngũ', () {
@@ -795,15 +865,47 @@ void main() {
       );
     });
 
-    test('Quán rượu nâng mức tinh thần cân bằng', () {
+    test('Quán rượu nâng mức tinh thần cân bằng; chưa xây Quán rượu thì Tinh thần không tự hồi', () {
       final s = fresh()..buildings[Building.tavern] = 2;
       s.res[Res.food] = 999;
       s.res[Res.coins] = 999;
+      GameRules.syncBarracksInstance(s);
+      final barracks = s.facilities.firstWhere(
+        (f) => f.type == FacilityType.barracks,
+      );
+      for (final x in s.roster) {
+        GameRules.assignToFacility(s, x.id, barracks.id);
+      }
       for (var i = 0; i < 20; i++) {
         GameRules.tickDay(s);
       }
-      // Doanh trại (+) cộng thêm 1/ngày cho lính nhàn rỗi nên dao động quanh mức cân bằng.
-      expect(s.roster.every((x) => x.morale >= 80 && x.morale <= 81), isTrue);
+      // Mức cân bằng = 80% Tinh thần tối đa (70% + 5% x cấp 2); Doanh trại (+) cộng thêm cho lính nhàn rỗi nên dao
+      // động quanh mức đó (trong khoảng vài điểm).
+      for (final x in s.roster) {
+        final cap = moraleCap(x);
+        expect(
+          x.morale,
+          inInclusiveRange((cap * 0.8).round() - 1, cap),
+          reason: x.name,
+        );
+      }
+      final none = fresh()..buildings[Building.barracks] = 0;
+      none.res[Res.food] = 999;
+      none.res[Res.coins] = 999;
+      for (final x in none.roster) {
+        x.morale = moraleCap(x) ~/ 3;
+      }
+      final before = {for (final x in none.roster) x.id: x.morale};
+      for (var i = 0; i < 10; i++) {
+        GameRules.tickDay(none);
+      }
+      for (final x in none.roster) {
+        expect(
+          x.morale,
+          before[x.id],
+          reason: 'không có công trình hồi Tinh thần',
+        );
+      }
     });
 
     test('nâng cấp công trình: chi phí, cấp tối đa, hiệu ứng sức chứa', () {
@@ -820,10 +922,10 @@ void main() {
   });
 
   group('Nhiệm vụ của nhà vua', () {
-    test('bảng nhiệm vụ có 3 đề nghị hợp tầng; nhận, giới hạn 3 nhiệm vụ', () {
+    test('bảng nhiệm vụ có nhiều đề nghị hợp tầng; nhận, giới hạn 3 nhiệm vụ đang làm', () {
       final s = fresh();
       final offers = GameRules.byStatus(s, MissionStatus.offered);
-      expect(offers.length, 3);
+      expect(offers.length, QuestGenerator.maxOffered);
       expect(
         offers.every((m) => templateById(m.templateId).tierMax >= s.tier),
         isTrue,
@@ -858,9 +960,10 @@ void main() {
       final coins = s.res[Res.coins]!;
       final sat = s.kingSatisfaction;
       expect(GameRules.completeMission(s, 50).ok, isTrue);
-      expect(s.res[Res.food], 30);
-      expect(s.res[Res.coins], coins + 50);
-      expect(s.kingSatisfaction, sat + 6);
+      final q = QuestEconomy.of(templateById('deliver_food_a'));
+      expect(s.res[Res.food], 80 - templateById('deliver_food_a').amount);
+      expect(s.res[Res.coins], coins + q.res[Res.coins]!);
+      expect(s.kingSatisfaction, sat + q.sat);
       expect(s.missionsCompleted, 1);
       expect(GameRules.completeMission(s, 50).ok, isFalse);
     });
@@ -872,7 +975,7 @@ void main() {
       s.res[Res.wood] = 0;
       final sat = s.kingSatisfaction;
       final t = templateById('deliver_wood_a');
-      for (var i = 0; i < t.days; i++) {
+      for (var i = 0; i < t.days - 1; i++) {
         GameRules.tickDay(s);
         s.res[Res.wood] = 0;
       }
@@ -888,17 +991,20 @@ void main() {
       expect(s.kingSatisfaction, sat - t.penaltySat);
     });
 
-    test('nộp đúng hạn ngày cuối vẫn được tính', () {
-      final s = fresh();
-      s.missions.add(Mission(id: 61, templateId: 'deliver_wood_a'));
-      GameRules.acceptMission(s..visiting ??= 'g_town', 61);
-      final t = templateById('deliver_wood_a');
-      for (var i = 0; i < t.days; i++) {
-        GameRules.tickDay(s);
-      }
-      s.res[Res.wood] = 100;
-      expect(GameRules.completeMission(s, 61).ok, isTrue);
-    });
+    test(
+      'nộp khi còn 1 ngày vẫn được tính (hết hạn khi số ngày còn lại về 0)',
+      () {
+        final s = fresh();
+        s.missions.add(Mission(id: 61, templateId: 'deliver_wood_a'));
+        GameRules.acceptMission(s..visiting ??= 'g_town', 61);
+        final t = templateById('deliver_wood_a');
+        for (var i = 0; i < t.days - 1; i++) {
+          GameRules.tickDay(s);
+        }
+        s.res[Res.wood] = 100;
+        expect(GameRules.completeMission(s, 61).ok, isTrue);
+      },
+    );
 
     test('hài lòng về 0 thì game over; mọi hành động bị chặn', () {
       final s = fresh()..kingSatisfaction = 5;
@@ -1006,16 +1112,15 @@ void main() {
         var got = 0;
         for (var seed = 0; seed < 10; seed++) {
           final t = fresh(seed);
+          final day = t.day;
           final r = GameRules.sendExpedition(t, 'g_farm', ids(t, 4), {});
-          expect(r.result.ok, isTrue);
-          if (r.battle == null) {
-            got = r.gained[Res.food]!;
-            expect(got, 40);
-            expect(t.day, 2);
-            break;
-          }
+          // Không còn sản lượng thu hoạch: điểm tài nguyên bị từ chối, không tốn ngày, không đổi tài nguyên.
+          expect(r.result.ok, isFalse);
+          expect(t.day, day);
+          expect(t.res[Res.food], fresh(seed).res[Res.food]);
+          got = 0;
         }
-        expect(got, 40);
+        expect(got, 0);
         expect(squad.length, 4);
         expect(s.res[Res.food], food);
       },
@@ -1123,7 +1228,8 @@ void main() {
       var done = false;
       for (var seed = 0; seed < 30 && !done; seed++) {
         final s = fresh(seed);
-        s.res.updateAll((_, _) => 500);
+        s.res[Res.coins] = 500;
+        s.res[Res.food] = 500;
         for (final c in s.candidates.take(3).toList()) {
           GameRules.hire(s, c.id);
         }
@@ -1142,11 +1248,9 @@ void main() {
         for (var i = 0; i < 3; i++) {
           GameRules.tickDay(s);
         }
-        final bandit = GameRules.byStatus(
-          s,
-          MissionStatus.offered,
-        ).where((m) => m.templateId == 'clear_bandits').firstOrNull;
-        if (bandit == null) continue;
+        // Mẫu cũ (trại cố định) vẫn chạy được cho save cũ; bảng nhiệm vụ mới chỉ sinh nhiệm vụ săn.
+        final bandit = Mission(id: 9000 + seed, templateId: 'clear_bandits');
+        s.missions.add(bandit);
         expect(
           GameRules.acceptMission(s..visiting ??= 'g_town', bandit.id).ok,
           isTrue,
@@ -1372,7 +1476,9 @@ void main() {
       );
       expect(
         s.roster.first.stats[Stat.str]!,
-        greaterThanOrEqualTo(6 + 2),
+        greaterThanOrEqualTo(
+          roleBaseStats[s.roster.first.role]![Stat.str]! + 2,
+        ),
       ); // Binh pháp 2
       expect(s.legacy, isNotNull);
       expect(s.legacy!['battleSeed'], 4242);
@@ -1518,7 +1624,6 @@ void balanceGuarantees() {
             so.stats[Stat.str] = so.stats[Stat.str]! < 11
                 ? 11
                 : so.stats[Stat.str]!;
-            so.accessoryId = 'saint_amulet';
           }
           so.weaponId = switch (r) {
             Role.archer => [

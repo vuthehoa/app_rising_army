@@ -36,8 +36,8 @@ final custom = PlayerIdentity(
 );
 
 void main() {
-  test('danh tính tùy chọn qua save/load v3, phiên bản vẫn là 3', () async {
-    expect(SaveRepository.latestVersion, 3);
+  test('danh tính tùy chọn qua save/load, phiên bản hiện hành là 5', () async {
+    expect(SaveRepository.latestVersion, 5);
     final repo = SaveRepository(MemoryStore());
     final s = GameRules.newGame(seed: 8, identity: custom);
     await repo.save(s);
@@ -57,21 +57,18 @@ void main() {
     expect(jsonEncode(c2.identity!.toJson()), jsonEncode(custom.toJson()));
   });
 
-  test(
-    'save v3 không có identity → mặc định xác định, tiến trình nguyên vẹn',
-    () async {
-      final j = GameRules.newGame(seed: 6).toJson()..remove('identity');
-      final store = MemoryStore()
-        ..data[SaveRepository.primaryKey] = envelope(3, j);
-      final r = await SaveRepository(store).load();
-      expect(r.status, LoadStatus.ok);
-      expect(
-        jsonEncode(r.state!.identity.toJson()),
-        jsonEncode(PlayerIdentity.defaults.toJson()),
-      );
-      expect(r.state!.soldiers.length, 6);
-    },
-  );
+  test('save v3 không có identity → nâng lên v5, danh tính mặc định xác định, tiến trình nguyên vẹn', () async {
+    final j = GameRules.newGame(seed: 6).toJson()..remove('identity');
+    final store = MemoryStore()
+      ..data[SaveRepository.primaryKey] = envelope(3, j);
+    final r = await SaveRepository(store).load();
+    expect(r.status, LoadStatus.migrated);
+    expect(
+      jsonEncode(r.state!.identity.toJson()),
+      jsonEncode(PlayerIdentity.defaults.toJson()),
+    );
+    expect(r.state!.soldiers.length, 6);
+  });
 
   test(
     'id không còn trong danh mục được chuẩn hóa từng trường, giữ phần còn lại',

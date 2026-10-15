@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 import '../../domain/building_effects.dart';
 import '../../domain/catalog.dart';
-import '../../domain/progression.dart';
+import '../../domain/equipment/equipment_item.dart';
+import '../widgets/equipment/item_summary.dart';
 import '../../domain/rules.dart';
 import '../widgets/art.dart';
+import '../widgets/camp/building_effect_details.dart';
 import '../widgets/camp/camp_build_menu.dart';
 import '../widgets/common.dart';
 import '../widgets/stat_icon.dart';
@@ -36,6 +38,7 @@ class BuildingsScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       CampBuildTile(
+                        key: ValueKey('camp-build-${building.id}'),
                         status: status,
                         state: s,
                         onSelected: () {
@@ -70,15 +73,23 @@ class BuildingsScreen extends StatelessWidget {
                             context: tileContext,
                             builder: (dialogContext) {
                               return AlertDialog(
+                                scrollable: true,
                                 title: Text(building.name),
-                                content: SingleChildScrollView(
+                                // Bề rộng cố định: AlertDialog hỏi kích thước nội tại, mà hàng icon hiệu ứng dùng LayoutBuilder
+                                // (không hỗ trợ truy vấn đó) nên trước đây hộp thoại này ném lỗi layout.
+                                content: SizedBox(
+                                  width: 340,
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
                                       SizedBox(
-                                        height: 120,
+                                        height:
+                                            MediaQuery.sizeOf(context).height <
+                                                420
+                                            ? 64
+                                            : 120,
                                         width: double.infinity,
                                         child: campBuildingArt(building),
                                       ),
@@ -89,6 +100,12 @@ class BuildingsScreen extends StatelessWidget {
                                         const SizedBox(height: 8),
                                         BuildingEffectIcons(
                                           displayEffectsOf(building.facility!),
+                                          onDark: true,
+                                        ),
+                                        const SizedBox(height: 6),
+                                        BuildingEffectDetails(
+                                          building.facility!,
+                                          level: 1,
                                           onDark: true,
                                         ),
                                       ],
@@ -211,14 +228,15 @@ class BuildingsScreen extends StatelessWidget {
       ),
     );
 
+    // Mỗi bản sao có biến thể là một ô riêng (khóa là mã tham chiếu), bản tiêu chuẩn xếp chồng.
     final inventoryItems = [
       for (final entry in s.inventory.entries)
-        if (entry.value > 0) (itemDefs[entry.key]!, entry.value),
+        if (entry.value > 0) (entry.key, entry.value),
     ];
 
     final inventory = Panel(
       title:
-          'Kho đồ ${GameRules.inventoryCount(s)}/${GameRules.inventoryCapacity(s)} • ${GameRules.chestCount(s)} hòm',
+          'Rương ${GameRules.inventoryWeightKg(s)}/${GameRules.inventoryCapacity(s)} kg • ${GameRules.chestCount(s)} hòm',
       child: inventoryItems.isEmpty
           ? Text('Kho trống.', style: Theme.of(context).textTheme.bodySmall)
           : Wrap(
@@ -228,10 +246,11 @@ class BuildingsScreen extends StatelessWidget {
                 for (final entry in inventoryItems)
                   Tooltip(
                     message:
-                        '${entry.$1.name} ×${entry.$2}\n${_line(entry.$1)}',
+                        '${itemDisplayName(entry.$1)} ×${entry.$2}\n${_line(itemDefs[entry.$1]!)}'
+                        '${(EquipmentItem.tryParse(entry.$1)?.effects ?? const []).map((e) => '\n${e.describe()}').join()}',
                     child: Stack(
                       children: [
-                        ItemGlyph(entry.$1.id, size: 42),
+                        ItemGlyph(entry.$1, size: 42),
                         Positioned(
                           right: 1,
                           bottom: 0,
@@ -267,16 +286,5 @@ class BuildingsScreen extends StatelessWidget {
     );
   }
 
-  static String _line(ItemDef item) => [
-    if (item.damage > 0) 'Công +${item.damage}',
-    if (item.defense > 0) 'Giáp +${item.defense}',
-    if (item.speed != 0) 'Tốc ${item.speed > 0 ? '+' : ''}${item.speed}',
-    for (final bonus in item.bonus.entries)
-      '${statNames[bonus.key]} +${bonus.value}',
-    if (item.weaponType != null)
-      '${weaponProfiles[item.weaponType]!.name} • ${item.interval.toStringAsFixed(1)}s • ${item.range.toStringAsFixed(1)}m',
-    if (item.totalArmorPen > 0) 'Xuyên giáp ${item.totalArmorPen}',
-    if (item.reqLevel > 1) 'Cấp ${item.reqLevel}+',
-    if (item.reqStr > 0) 'SM ${item.reqStr}+',
-  ].join(' • ');
+  static String _line(ItemDef item) => itemSummaryLine(item);
 }

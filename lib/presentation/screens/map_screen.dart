@@ -10,6 +10,7 @@ import '../../application/hero_travel.dart';
 import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
+import '../../domain/movement.dart';
 import '../../domain/rules.dart';
 import '../../domain/world_data.dart';
 import '../../domain/world_map.dart';
@@ -61,6 +62,17 @@ class _MapScreenState extends State<MapScreen>
 
   String? _selPoi;
 
+  /// Hiệu ứng phản hồi thuần giao diện (vòng sóng tại điểm chạm không hợp lệ / điểm vừa tới). Không là state
+  /// gameplay: chỉ neo theo tọa độ thế giới và tự biến mất.
+  final List<_Ping> _pings = [];
+  int _pingSeq = 0;
+  bool _wasMoving = false;
+
+  void _ping(WPoint at, {required bool bad}) {
+    if (!mounted) return;
+    setState(() => _pings.add(_Ping(_pingSeq++, at, bad)));
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -93,6 +105,13 @@ class _MapScreenState extends State<MapScreen>
 
   void _onTravel() {
     final travel = _travel!;
+    final state = _controller.state;
+    if (_wasMoving && !travel.moving && state != null) {
+      if (travel.status == MoveStatus.arrived) {
+        _ping(state.hero.position, bad: false);
+      }
+    }
+    _wasMoving = travel.moving;
     _wake();
     _checkArrival();
     if (travel.noticeSeq != _seenNotice) {
@@ -125,6 +144,7 @@ class _MapScreenState extends State<MapScreen>
   void _startWalk(WPoint dest) {
     final problem = _controller.travel.setDestination(dest);
     if (problem != null) {
+      _ping(dest, bad: true);
       showSnack(context, problem, color: const Color(0xFF4A2019));
       return;
     }
@@ -169,7 +189,7 @@ class _MapScreenState extends State<MapScreen>
       return;
     }
     final state = _controller.state!;
-    final loc = locationById(id);
+    final loc = GameRules.locationFor(state, id);
     final quests = GameRules.activeAt(state, id);
     if (loc == null || quests.isEmpty) {
       showSnack(
@@ -342,7 +362,58 @@ class _MapScreenState extends State<MapScreen>
                 ),
               ),
             ),
+            // Viền tối nhẹ quanh bản đồ: dồn mắt vào giữa, HUD đọc rõ hơn (không nhận chạm).
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      radius: 1.15,
+                      colors: [Color(0x00000000), Color(0x66000000)],
+                      stops: [0.62, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: camera,
+                  builder: (context, _) => Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      for (final p in _pings)
+                        Positioned(
+                          key: ValueKey('map-ping-${p.id}'),
+                          left: camera.worldToScreen(p.at).dx - 28,
+                          top: camera.worldToScreen(p.at).dy - 28,
+                          child: _PingRing(
+                            bad: p.bad,
+                            onDone: () {
+                              if (mounted) setState(() => _pings.remove(p));
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             const GameHudOverlay(),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 84 + MediaQuery.paddingOf(context).bottom,
+              child: IgnorePointer(
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: travel,
+                    builder: (context, _) => _routeChip(state, travel),
+                  ),
+                ),
+              ),
+            ),
             Positioned(right: 10, bottom: 12, child: _controls(state)),
             Positioned(
               left: 0,
@@ -359,6 +430,39 @@ class _MapScreenState extends State<MapScreen>
           ],
         );
       },
+    );
+  }
+
+  /// Thẻ nhỏ mô tả hành trình đang đi: đích và thể lực dự tính. Chỉ đọc [MovementRules.estimate]; ẩn khi đứng yên.
+  Widget _routeChip(GameState state, HeroTravel travel) {
+    final dest = travel.destination;
+    if (dest == null) return const SizedBox.shrink();
+    final est = MovementRules.estimate(worldMap, state.hero.position, dest);
+    final id = travel.targetPlace;
+    final name = id == null
+        ? null
+        : (GameRules.locationFor(state, id)?.name ?? locationById(id)?.name);
+    final short = est.cost > state.hero.stamina;
+    return Container(
+      key: const ValueKey('map-route-chip'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xE6140F0A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: short ? const Color(0xFFC4473B) : Pal.goldDim,
+        ),
+      ),
+      child: Text(
+        '${name == null ? 'Đang đi tới điểm đã chọn' : 'Đang đi tới $name'}'
+        ' · tốn ~${est.cost.round()} thể lực (quãng còn lại)'
+        '${short ? ' · không đủ: còn ${state.hero.stamina.round()}, sẽ dừng giữa đường' : ''}',
+        style: TextStyle(
+          color: short ? const Color(0xFFFFB4A8) : Pal.goldLight,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 
@@ -391,7 +495,7 @@ class _MapScreenState extends State<MapScreen>
             labelLift: 108 * z + 14,
             showLabel: z >= 0.7 || near,
             selected: _controller.travel.targetPlace == t.id,
-            locked: !GameRules.regionUnlocked(state, regionById(loc.regionId)),
+            locked: false, // thành phố luôn mở
             onTap: () => _goTo(t.id),
           ),
         ),
@@ -402,16 +506,11 @@ class _MapScreenState extends State<MapScreen>
     for (final m in trackedQuestList(state)) {
       if (m.targetId != null) (questAt[m.targetId!] ??= []).add(m);
     }
-    final shown = <LocationDef>[
-      ...GameRules.visibleLocations(state),
-      for (final id in questAt.keys)
-        if (locationById(id) != null &&
-            !GameRules.visibleLocations(state).any((l) => l.id == id))
-          locationById(id)!,
-    ];
+    // Điểm hiển thị lấy từ luật (điểm đã hoàn thành biến mất hẳn, xem GameRules.mapPoints).
+    final shown = GameRules.mapPoints(state);
     for (final loc in shown) {
       if (loc.kind == LocKind.city) continue;
-      final p = worldMap.placements[loc.id];
+      final p = GameRules.targetPosition(state, loc.id);
       if (p == null) continue;
       final s = camera.worldToScreen(p);
       if (s.dx < -60 ||
@@ -439,7 +538,7 @@ class _MapScreenState extends State<MapScreen>
       );
     }
     questAt.forEach((id, missions) {
-      final p = worldMap.positionOf(id);
+      final p = GameRules.targetPosition(state, id);
       if (p == null) return;
       final s = camera.worldToScreen(p);
       final isTown = worldMap.townById(id) != null;
@@ -473,7 +572,7 @@ class _MapScreenState extends State<MapScreen>
     final tracked = GameRules.trackedMission(state);
     final targetPos = tracked == null
         ? null
-        : worldMap.positionOf(tracked.targetId!);
+        : GameRules.targetPosition(state, tracked.targetId!);
     if (targetPos != null && targetPos.distanceTo(hero.position) > 40) {
       arrow = bearing(s, camera.worldToScreen(targetPos));
     }
@@ -658,4 +757,57 @@ class _MapButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Một điểm phản hồi trên bản đồ (neo theo tọa độ thế giới).
+class _Ping {
+  _Ping(this.id, this.at, this.bad);
+  final int id;
+  final WPoint at;
+  final bool bad;
+}
+
+/// Vòng sóng ngắn: đỏ khi điểm chạm không hợp lệ, vàng khi nhân vật vừa tới nơi. Tự kết thúc sau một nhịp.
+class _PingRing extends StatelessWidget {
+  const _PingRing({required this.bad, required this.onDone});
+
+  final bool bad;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 650),
+      curve: Curves.easeOut,
+      onEnd: onDone,
+      builder: (context, v, _) =>
+          CustomPaint(size: const Size(56, 56), painter: _PingPainter(v, bad)),
+    );
+  }
+}
+
+class _PingPainter extends CustomPainter {
+  _PingPainter(this.t, this.bad);
+  final double t;
+  final bool bad;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final color = bad ? const Color(0xFFE0574A) : const Color(0xFFFFE29A);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3 * (1 - t) + 1
+      ..color = color.withValues(alpha: 1 - t);
+    canvas.drawCircle(c, 6 + 22 * t, paint);
+    if (bad) {
+      final k = 7 * (1 - t * 0.4);
+      canvas.drawLine(c + Offset(-k, -k), c + Offset(k, k), paint);
+      canvas.drawLine(c + Offset(-k, k), c + Offset(k, -k), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PingPainter old) => old.t != t;
 }

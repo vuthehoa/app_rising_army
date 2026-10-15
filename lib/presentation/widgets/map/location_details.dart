@@ -18,7 +18,9 @@ class LocationDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = ControllerScope.of(context);
     final state = controller.state!;
-    final location = selected == null ? null : locationById(selected!);
+    final location = selected == null
+        ? null
+        : GameRules.locationFor(state, selected!);
 
     if (location == null) return const SizedBox.shrink();
 
@@ -140,9 +142,7 @@ class LocationDetails extends StatelessWidget {
                 enemyInfo(),
                 const SizedBox(height: 10),
                 Text(
-                  'Chiến lợi phẩm: '
-                  '${GameRules.describeCost(location.loot)}'
-                  '${location.lootItem != null ? ' + ${itemDefs[location.lootItem]!.name}' : ''}',
+                  'Chiến lợi phẩm: ${GameRules.lootPreview(location)}',
                   style: const TextStyle(fontSize: 12, color: Pal.moss),
                 ),
               ],

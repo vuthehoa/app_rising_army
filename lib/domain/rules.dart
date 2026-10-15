@@ -1,19 +1,30 @@
 import 'dart:math';
 
+import '../data/name_generator.dart';
+import '../data/new_game_data.dart' show AvatarGender;
 import 'battle.dart';
 import 'building_effects.dart';
 import 'camp_layout.dart';
 import 'catalog.dart';
+import 'combat_condition.dart';
 import 'dev_mode.dart';
+import 'economy.dart';
+import 'equipment/equipment_item.dart';
+import 'equipment/equipment_rules.dart';
+import 'equipment/equipment_service.dart';
 import 'identity.dart';
 import 'item_grade.dart';
 import 'models.dart';
+import 'movement.dart';
 import 'progression.dart';
+import 'quest_generator.dart';
+import 'stat_formulas.dart';
 import 'stats.dart';
 import 'terrain_type.dart';
 import 'world_data.dart';
+import 'world_map.dart';
 
-enum CasualtyKind { survived, wounded, dead }
+enum CasualtyKind { survived, wounded, dead, deserted }
 
 /// Trạng thái hiển thị/điều kiện của một công trình trong catalog trại (xem [GameRules.campStatus]).
 class CampBuildStatus {
@@ -49,25 +60,93 @@ class CampBuildStatus {
 }
 
 class Casualty {
-  Casualty(this.id, this.name, this.kind, {this.xp = 0, this.levelUps = 0});
+  Casualty(
+    this.id,
+    this.name,
+    this.kind, {
+    this.xp = 0,
+    this.levelUps = 0,
+    this.energyBefore,
+    this.energyAfter,
+    this.moraleBefore,
+    this.moraleAfter,
+    this.levelAfter,
+    this.statPointsAfter,
+    this.fled = false,
+  });
   final int id;
   final String name;
   final CasualtyKind kind;
   final int xp;
   final int levelUps;
+
+  /// Ảnh chụp thể trạng ngay trước/sau [GameRules.applyBattle] (không lưu vào save; chỉ phục vụ màn kết quả).
+  /// null khi không có số liệu đáng tin.
+  final int? energyBefore;
+  final int? energyAfter;
+  final int? moraleBefore;
+  final int? moraleAfter;
+
+  /// Cấp và điểm chỉ số chưa dùng sau trận.
+  final int? levelAfter;
+  final int? statPointsAfter;
+
+  /// Tinh thần về 0 GIỮA trận nên bỏ chạy (khác đào ngũ do tinh thần cạn sau trận).
+  final bool fled;
+
+  int? get energySpent => energyBefore == null || energyAfter == null
+      ? null
+      : energyBefore! - energyAfter!;
+  int? get moraleDelta => moraleBefore == null || moraleAfter == null
+      ? null
+      : moraleAfter! - moraleBefore!;
+
+  Casualty copyWith({CasualtyKind? kind, int? energyAfter, int? moraleAfter}) =>
+      Casualty(
+        id,
+        name,
+        kind ?? this.kind,
+        xp: xp,
+        levelUps: levelUps,
+        energyBefore: energyBefore,
+        energyAfter: energyAfter ?? this.energyAfter,
+        moraleBefore: moraleBefore,
+        moraleAfter: moraleAfter ?? this.moraleAfter,
+        levelAfter: levelAfter,
+        statPointsAfter: statPointsAfter,
+        fled: fled,
+      );
 }
 
 class DayReport {
   const DayReport({
     required this.stipend,
     required this.upkeep,
+    required this.paidUpkeep,
     required this.paid,
     required this.lines,
   });
   final Cost stipend;
-  final int upkeep;
+
+  /// Chi phí duy trì quân của ngày (vàng + lương) theo cấp từng binh sĩ (xem [UpkeepEconomy]).
+  final Cost upkeep;
+
+  /// Phần chi phí duy trì thực sự đã trừ (bằng [upkeep] khi [paid], nhỏ hơn khi thiếu tài nguyên).
+  final Cost paidUpkeep;
   final bool paid;
   final List<String> lines;
+}
+
+/// Phần thưởng THỰC SỰ đã trao khi hoàn thành một nhiệm vụ (ghi lại lúc chốt để màn kết quả hiển thị đúng thứ đã vào
+/// kho, không suy đoán lại). Chỉ được tạo bởi `GameRules._settle`, nên mỗi nhiệm vụ nhiều nhất một bản ghi.
+class QuestPayout {
+  QuestPayout(this.title);
+  final String title;
+  final Cost res = {};
+  final List<String> items = [];
+  int exp = 0;
+  int sat = 0;
+  final List<String> levelUps = [];
 }
 
 class ExpeditionResult {
@@ -78,7 +157,13 @@ class ExpeditionResult {
   BattleReport? battle;
   List<Casualty> casualties = [];
   Cost gained = {};
-  String? itemGained;
+
+  /// Trang bị nhận được (mã tham chiếu trong kho), theo thứ tự nhận.
+  final List<String> itemsGained = [];
+
+  /// Thưởng nhiệm vụ đã trao ngay sau trận này (tách khỏi chiến lợi phẩm [gained] / [itemsGained]).
+  final List<QuestPayout> payouts = [];
+  String? get itemGained => itemsGained.isEmpty ? null : itemsGained.first;
   String? discovered;
   bool ambush = false;
   final List<String> lines = [];
@@ -91,24 +176,24 @@ class GameRules {
   GameRules._();
 
   static const maxSquad = 10;
+
+  /// Số nhiệm vụ đang nhận (active) tối đa cùng lúc. Luật này ở domain: UI, gọi trực tiếp và tải save đều theo nó.
+  static const maxActiveMissions = 3;
+
+  /// Khoảng cách (đơn vị thế giới) tối đa tới điểm giao chiến để được bắt đầu trận. Đi bộ dừng đúng tâm điểm.
+  static const encounterArriveRadius = 80.0;
   static const startRoster = 6;
 
   static Random rng(GameState s) => Random(s.seed * 7919 + s.rngCounter++);
 
   // ---------- Tạo ván mới & sinh binh sĩ ----------
 
-  static const _base = <Role, Map<Stat, int>>{
-    Role.spearman: {Stat.str: 6, Stat.dex: 5, Stat.con: 6},
-    Role.archer: {Stat.str: 3, Stat.dex: 8, Stat.con: 4},
-    Role.cavalry: {Stat.str: 6, Stat.dex: 6, Stat.con: 5},
-  };
-
-  static String _name(Random r) {
-    final n = firstNames[r.nextInt(firstNames.length)];
-    return r.nextInt(100) < 30
-        ? '$n ${nickNames[r.nextInt(nickNames.length)]}'
-        : n;
-  }
+  /// Tên binh sĩ lấy từ `NameData` (danh sách tên chuẩn của dự án) qua [NameGenerator], dùng đúng bộ `Random` của luật
+  /// (seed + rngCounter) nên tái lập được. Giới tính chỉ để chọn kho tên; binh sĩ không lưu giới tính.
+  static String _name(Random r) => NameGenerator.generate(
+    r.nextBool() ? AvatarGender.male : AvatarGender.female,
+    r,
+  );
 
   static Soldier generateSoldier(
     GameState s, {
@@ -120,7 +205,10 @@ class GameRules {
     final rl = role ?? Role.values[r.nextInt(Role.values.length)];
     final stats = {
       for (final st in Stat.values)
-        st: _base[rl]![st]! + r.nextInt(3) + (level - 1),
+        st:
+            roleBaseStats[rl]![st]! +
+            r.nextInt(StatFormulas.startSpread) +
+            (level - 1) * StatFormulas.perLevelBonus,
     };
     final trait = r.nextInt(100) < 45
         ? TraitId.none
@@ -132,13 +220,25 @@ class GameRules {
       stats: stats,
       level: level,
       trait: trait,
+      atkPoints:
+          roleBaseAttack[rl]! +
+          r.nextInt(StatFormulas.startSpread) +
+          (level - 1) * StatFormulas.perLevelBonus,
     );
     if (equip) {
       sol.weaponId = starterWeapon[rl];
       sol.armorId = 'padded_armor';
     }
-    sol.hp = deriveStats(sol).maxHp;
+    fillVitals(sol);
     return sol;
+  }
+
+  /// Đặt HP và Thể lực đầy, Tinh thần ở mức khởi đầu ([startMoraleFraction] của tối đa) theo chỉ số hiện có.
+  static void fillVitals(Soldier so) {
+    final d = deriveStats(so);
+    so.hp = d.maxHp;
+    so.energy = d.maxEnergy;
+    so.morale = (d.maxMorale * startMoraleFraction).round();
   }
 
   /// [identity] mặc định là [PlayerIdentity.defaults]. Danh tính tự đặt phải hợp lệ
@@ -151,15 +251,7 @@ class GameRules {
       seed: seed,
       identity: identity?.trimmed() ?? PlayerIdentity.defaults,
       day: 1,
-      res: {
-        Res.food: 80,
-        Res.coins: 120,
-        Res.wood: 40,
-        Res.iron: 20,
-        Res.tools: 0,
-        Res.stone: 0,
-        Res.cloth: 0,
-      },
+      res: Map.of(StartingEconomy.resources),
       soldiers: [],
       nextSoldierId: 1,
       // Mọi công trình đều phải được xây (cấp 0 = chưa xây). Bếp lửa giữa trại chỉ là hình trang trí
@@ -167,7 +259,7 @@ class GameRules {
       buildings: {for (final b in Building.values) b: 0},
       facilities: [],
       nextFacilityId: 1,
-      inventory: {'padded_armor': 1, 'iron_ring': 1, 'lucky_charm': 1},
+      inventory: {'padded_armor': 1},
       candidates: [],
       missions: [],
       nextMissionId: 1,
@@ -216,6 +308,9 @@ class GameRules {
   /// Chỉ dùng cho mô phỏng: gọi sau mỗi lần qua ngày.
   static void Function(GameState s)? dayHook;
 
+  /// Chỉ dùng cho mô phỏng: như [dayHook] nhưng nhận cả báo cáo ngày (bổng lộc, chi phí duy trì).
+  static void Function(GameState s, DayReport r)? dayReportHook;
+
   /// Trả chi phí [c]. Không làm gì khi Develop Mode miễn chi phí.
   /// Dùng cho CHI PHÍ; việc giao ra tài nguyên thật (bán hàng) dùng [_deduct].
   static void spend(GameState s, Cost c) {
@@ -262,11 +357,13 @@ class GameRules {
 
   static int rosterCap(GameState s) => 6 + 4 * level(s, Building.barracks);
 
-  static int statCap(Soldier s) => 10 + 2 * s.level;
+  static int statCap(Soldier s) => StatFormulas.statCap(s.level);
 
   static Cost? upgradeCost(GameState s, Building b) {
     final l = level(s, b);
-    return l >= GameState.maxBuildingLevel ? null : upgradeCosts[l + 1];
+    return l >= GameState.maxBuildingLevel
+        ? null
+        : ConstructionEconomy.barracksUpgradeCost(l + 1);
   }
 
   /// Nâng cấp một công trình cấp bậc. Doanh trại cấp 0 chưa được xây nên không nâng cấp được: phải
@@ -290,6 +387,65 @@ class GameRules {
     return ActionResult.ok('${buildingNames[b]} lên cấp ${level(s, b)}.');
   }
 
+  // ---------- Cứu trợ chống softlock ----------
+
+  /// Sau một lần cứu trợ, phải qua chừng này ngày mới có thể có lần nữa (chống lạm dụng).
+  static const reliefCooldownDays = 15;
+
+  /// Quà cứu trợ: một tân binh cấp 1 (đủ để đi làm nhiệm vụ dễ) và ít vàng/lương để trả những ngày đầu.
+  static const reliefGrant = <Res, int>{Res.coins: 12, Res.food: 8};
+
+  /// Tổng vàng có thể có ngay không cần quân: vàng hiện có + bán hết trang bị trong kho + bán hết tài nguyên.
+  static int _liquidGold(GameState s) {
+    var gold = s.res[Res.coins] ?? 0;
+    for (final e in s.inventory.entries) {
+      final d = itemDefs[EquipmentItem.tryParse(e.key)?.designId ?? e.key];
+      if (d != null && e.value > 0) gold += sellPrice(d.id) * e.value;
+    }
+    for (final r in Res.values) {
+      if (r == Res.coins || !MarketEconomy.tradable(r)) continue;
+      gold += s.res[r]! * resourceSellPrice(r);
+    }
+    return gold;
+  }
+
+  /// Bế tắc thật sự: không còn binh sĩ nào, và không có đường nào để có lại quân — không đủ vàng (kể cả khi bán hết
+  /// kho/tài nguyên) để chiêu mộ ứng viên rẻ nhất, cũng không hồi sinh nổi ai. Không chỉ nhìn `vàng == 0`.
+  static bool isSoftlocked(GameState s) {
+    if (s.roster.isNotEmpty || s.gameOver || s.victory) return false;
+    final gold = _liquidGold(s);
+    final prices = [
+      for (final c in s.candidates)
+        if (HireEconomy.hireable(c)) hireCost(c),
+    ];
+    final cheapestHire = prices.isEmpty
+        ? HireEconomy.levelBase[1]!
+        : prices.reduce(min);
+    if (gold >= cheapestHire) return false;
+    if (facilityCount(s, FacilityType.gravestone) > 0 &&
+        s.fallen.any((x) => reviveCost(x) <= gold)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Gọi khi qua ngày: nếu bế tắc và đã hết thời gian chờ, tặng một tân binh cấp 1 + ít tài nguyên, đúng một lần mỗi
+  /// chu kỳ. Trả về dòng báo cáo (null nếu không kích hoạt). Trạng thái dùng lưu ở [GameState.reliefDay].
+  static String? _maybeRelief(GameState s) {
+    if (!isSoftlocked(s)) return null;
+    if (s.reliefDay >= 0 && s.day - s.reliefDay < reliefCooldownDays) {
+      return null;
+    }
+    s.reliefDay = s.day;
+    final rookie = generateSoldier(s, level: 1, equip: true);
+    s.soldiers.add(rookie);
+    grant(s, reliefGrant);
+    s.addLog('Cứu trợ: ${rookie.name} gia nhập.');
+    return 'Làng lân cận thương tình: ${rookie.name} (cấp 1) xin gia nhập cùng '
+        '${describeCost(reliefGrant)} để bạn gượng dậy. Cứu trợ chỉ có khi mất sạch quân và vốn, '
+        'tối thiểu $reliefCooldownDays ngày mới có lại.';
+  }
+
   // ---------- Tuyển mộ ----------
 
   static void refreshCandidates(GameState s) {
@@ -307,8 +463,8 @@ class GameRules {
     }
   }
 
-  static int hireCost(Soldier c) =>
-      25 + c.stats.values.fold(0, (a, b) => a + b) * 2 + c.level * 10;
+  /// Giá chiêu mộ (chỉ vàng): nguồn duy nhất cho giá hiển thị và số vàng bị trừ. Xem [HireEconomy.price].
+  static int hireCost(Soldier c) => HireEconomy.price(c);
 
   /// Chiêu mộ tại Quán rượu [vendorId]: phải đang ở thành phố của quán, quán là loại tavern và mở cửa;
   /// sau đó dùng đúng luật [hire] (một ứng viên, trừ vàng đúng một lần, không đổi gì khi thất bại).
@@ -326,6 +482,27 @@ class GameRules {
     return hire(s, candidateId);
   }
 
+  /// Hàm chọn trang bị khởi đầu cho một ô (tách ra để kiểm thử trường hợp catalog thiếu món).
+  static String? Function(Random, Slot, Soldier) hireGearPicker = HireGear.roll;
+
+  /// Áo giáp + vũ khí cho ứng viên [c], hoặc null nếu không chọn được đủ các ô bắt buộc. Chỉ điền ô CÒN TRỐNG (không
+  /// ghi đè đồ đã có), không đụng kho đồ, không dùng/tăng bộ đếm RNG của ván: mỗi ô dùng một dòng RNG dẫn xuất từ
+  /// (seed ván, id ứng viên, ô) nên cùng ván + cùng ứng viên luôn ra cùng đồ, dù mở lại Quán rượu hay thử lại.
+  static Map<Slot, String>? starterGearFor(GameState s, Soldier c) {
+    final out = <Slot, String>{};
+    for (final slot in HireGear.requiredSlots) {
+      if (c.equipped(slot) != null) continue;
+      final r = Random(
+        (s.seed * 1000003 + c.id * 7919 + (slot.index + 1) * 104729 + 17) &
+            0x7fffffff,
+      );
+      final id = hireGearPicker(r, slot, c);
+      if (id == null || itemDefs[id]?.slot != slot) return null;
+      out[slot] = id;
+    }
+    return out;
+  }
+
   static ActionResult hire(GameState s, int candidateId) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
@@ -337,11 +514,26 @@ class GameRules {
       );
     }
     final c = s.candidates[i];
+    if (!HireEconomy.hireable(c)) {
+      return const ActionResult.fail(
+        'Chỉ chiêu mộ được anh hùng cấp 1–$tavernMaxCandidateLevel.',
+      );
+    }
     final cost = {Res.coins: hireCost(c)};
     if (!canAfford(s, cost)) {
       return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
     }
+    // Lính chiêu mộ LUÔN có áo giáp và vũ khí. Chọn xong (và hợp lệ) rồi mới trừ vàng: thiếu món hợp lệ thì thất bại
+    // nguyên vẹn, không tạo lính thiếu đồ.
+    final gear = starterGearFor(s, c);
+    if (gear == null) {
+      return const ActionResult.fail(
+        'Không có trang bị phù hợp để trang bị cho ứng viên này.',
+      );
+    }
     spend(s, cost);
+    gear.forEach(c.setEquipped);
+    fillVitals(c); // trang bị đổi chỉ số gốc hiệu dụng → HP/Thể lực/Tinh thần tối đa; lính mới nên đầy
     s.candidates.removeAt(i);
     s.soldiers.add(c);
     s.addLog('Tuyển ${c.name} (${roleNames[c.role]}).');
@@ -350,12 +542,13 @@ class GameRules {
 
   static ActionResult rename(GameState s, int id, String name) {
     final so = s.soldier(id);
-    final n = name.trim();
+    // Chuẩn hóa như tên chỉ huy: bỏ khoảng trắng đầu/cuối và gộp khoảng trắng liên tiếp.
+    final n = NameGenerator.normalize(name);
     if (so == null || !so.alive) {
       return const ActionResult.fail('Không tìm thấy binh sĩ.');
     }
-    if (n.isEmpty || n.length > 24) {
-      return const ActionResult.fail('Tên phải dài 1-24 ký tự.');
+    if (n.isEmpty || n.length > maxDisplayNameLength) {
+      return ActionResult.fail('Tên phải dài 1-$maxDisplayNameLength ký tự.');
     }
     so.name = n;
     return ActionResult.ok('Đã đổi tên thành $n.');
@@ -402,6 +595,10 @@ class GameRules {
   static bool takesAssignment(FacilityType t) =>
       facilityDefs[t]!.takesAssignment;
 
+  /// Số chỗ của công trình [f]: Doanh trại theo cấp bậc ([rosterCap] = 6 + 4 mỗi cấp), còn lại theo cấp slot.
+  static int slotsOf(GameState s, Facility f) =>
+      f.type == FacilityType.barracks ? rosterCap(s) : f.slots;
+
   /// Gán binh sĩ vào công trình (kéo-thả). Tự rút khỏi công trình cũ. Thông báo "Unit added" ở game gốc.
   static ActionResult assignToFacility(
     GameState s,
@@ -422,9 +619,10 @@ class GameRules {
     if (f.assigned.contains(soldierId)) {
       return const ActionResult.fail('Binh sĩ đã ở công trình này.');
     }
-    if (f.assigned.length >= f.slots) {
+    final slots = slotsOf(s, f);
+    if (f.assigned.length >= slots) {
       return ActionResult.fail(
-        '${facilityDefs[f.type]!.name} đã đầy (${f.slots}/${f.slots}).',
+        '${facilityDefs[f.type]!.name} đã đầy ($slots/$slots).',
       );
     }
     final st = facilityDefs[f.type]!.trains;
@@ -462,8 +660,9 @@ class GameRules {
       return 'Doanh trại quyết định quân số tối đa nên không thể xóa.';
     }
     if (f.type == FacilityType.storageChest &&
-        inventoryCount(s) > inventoryCapacity(s) - chestInventoryBonus) {
-      return 'Kho đồ đang chứa quá sức chứa còn lại nếu bỏ Hòm đồ này.';
+        inventoryWeightTenths(s) >
+            inventoryCapacityTenths(s) - WeightEconomy.perChestKg * 10) {
+      return 'Rương đang chứa quá sức chứa còn lại nếu bỏ Hòm đồ này.';
     }
     return null;
   }
@@ -486,7 +685,7 @@ class GameRules {
   /// Công trình nhận binh sĩ có nâng cấp slot được không (đúng 4 loại trong [facilityUpgradeCosts]; Doanh trại
   /// đi theo [upgradeBuilding]).
   static bool facilityUpgradable(Facility f) =>
-      facilityUpgradeCosts.containsKey(f.type);
+      slotUpgradableFacilities.contains(f.type);
 
   /// Nâng cấp slot 3 → 6, đúng một lần.
   static ActionResult upgradeFacility(GameState s, int id) {
@@ -494,7 +693,7 @@ class GameRules {
     if (blocked != null) return blocked;
     final f = facilityById(s, id);
     if (f == null) return const ActionResult.fail('Công trình không tồn tại.');
-    final cost = facilityUpgradeCosts[f.type];
+    final cost = ConstructionEconomy.slotUpgradeCost(f.type);
     if (cost == null) {
       return const ActionResult.fail('Công trình này không có nâng cấp slot.');
     }
@@ -534,10 +733,14 @@ class GameRules {
       return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
     }
     spend(s, cost);
+    // Hồi sinh chỉ trả lại sự sống: HP = 1, năng lượng/tinh thần giữ nguyên, bắt buộc chữa trị trước khi ra trận.
     so.status = SoldierStatus.active;
-    so.hp = so.maxHp;
-    s.addLog('${so.name} được hồi sinh.');
-    return ActionResult.ok('${so.name} đã được hồi sinh.');
+    so.hp = 1;
+    so.needsTreatment = true;
+    s.addLog('${so.name} được hồi sinh với 1 HP, cần chữa trị.');
+    return ActionResult.ok(
+      '${so.name} đã được hồi sinh (HP 1). Hãy chữa trị ở Lều cứu thương.',
+    );
   }
 
   /// Đặt binh sĩ đứng tự do tại (x, y) trong Trại. Vị trí không hợp lệ thì không đổi gì. Nếu lính đang ở
@@ -663,10 +866,11 @@ class GameRules {
     }
     final check = checkPlacement(s, type, x, y);
     if (!check.ok) return ActionResult.fail(check.message);
-    if (!canAfford(s, def.cost)) {
-      return ActionResult.fail('Không đủ: ${_missing(s, def.cost)}.');
+    final price = ConstructionEconomy.buildCost(type);
+    if (!canAfford(s, price)) {
+      return ActionResult.fail('Không đủ: ${_missing(s, price)}.');
     }
-    spend(s, def.cost);
+    spend(s, price);
     s.facilities.add(Facility(id: s.nextFacilityId++, type: type, x: x, y: y));
     if (type == FacilityType.barracks) s.buildings[Building.barracks] = 1;
     s.addLog('Xây ${def.name}.');
@@ -777,14 +981,16 @@ class GameRules {
         (slotFacilityCount(s) >= maxFacilities ||
             suggestPlacement(s, t) == null)) {
       why = 'Hết ô trống';
-    } else if (!canAfford(s, def.cost)) {
+    } else if (!canAfford(s, ConstructionEconomy.buildCost(t))) {
       why = 'Không đủ tài nguyên';
     }
     return CampBuildStatus(
       def: d,
       count: count,
       level: 0,
-      cost: max != null && count >= max ? null : def.cost,
+      cost: max != null && count >= max
+          ? null
+          : ConstructionEconomy.buildCost(t),
       reason: why,
       needsPlacement: true,
     );
@@ -798,27 +1004,128 @@ class GameRules {
     return buildFacility(s, d.facility!, -1);
   }
 
-  /// Trả về số cấp tăng.
+  /// XP thực tế [so] nhận được từ [amount] XP gốc (trait Học nhanh +30%); 0 nếu đã đạt cấp tối đa.
+  static int xpGainFor(Soldier so, int amount) {
+    if (amount <= 0 || so.level >= maxSoldierLevel) return 0;
+    return so.trait == TraitId.quickLearner ? (amount * 1.3).round() : amount;
+  }
+
+  /// Cộng XP (trait Học nhanh +30%). Mỗi lần lên cấp (tới [maxSoldierLevel]) cho đúng 1 điểm chỉ số chưa phân
+  /// bổ ([Soldier.statPoints]); không tự tăng chỉ số. Đạt cấp tối đa thì không tích XP nữa. Trả về số cấp tăng.
   static int addXp(Soldier so, int amount) {
-    final gain = so.trait == TraitId.quickLearner
-        ? (amount * 1.3).round()
-        : amount;
+    if (amount <= 0 || so.level >= maxSoldierLevel) {
+      if (so.level >= maxSoldierLevel) so.xp = 0;
+      return 0;
+    }
+    final gain = xpGainFor(so, amount);
     so.xp += gain;
     var ups = 0;
-    while (so.xp >= xpForNext(so.level) && so.level < maxSoldierLevel) {
+    while (so.level < maxSoldierLevel && so.xp >= xpForNext(so.level)) {
       so.xp -= xpForNext(so.level);
       so.level++;
+      so.statPoints++;
       ups++;
-      final main = switch (so.role) {
-        Role.spearman => [Stat.con, Stat.str],
-        Role.archer => [Stat.dex, Stat.str],
-        Role.cavalry => [Stat.str, Stat.dex],
-      };
-      final st = main[so.level % 2];
-      so.stats[st] = so.stats[st]! + 1;
     }
+    if (so.level >= maxSoldierLevel) so.xp = 0;
+    // Lên cấp THẬT SỰ (ups > 0) → hồi đầy HP / Thể lực / Tinh thần theo chỉ số tối đa SAU KHI lên cấp (cấp và trang bị
+    // cuối cùng, kể cả lên nhiều cấp một lần). Điểm DUY NHẤT: mọi nguồn EXP (trận, nhiệm vụ…) đều đi qua đây.
+    // Nhận EXP chưa đủ lên cấp, hoặc đã tối đa cấp, thì không hồi gì.
+    if (ups > 0) restoreVitalsFull(so);
     return ups;
   }
+
+  /// Đặt HP, Thể lực, Tinh thần hiện tại = mức tối đa hiện tại (tính lại từ bốn chỉ số gốc hiệu dụng).
+  static void restoreVitalsFull(Soldier so) {
+    final d = deriveStats(so);
+    so.hp = d.maxHp;
+    so.energy = d.maxEnergy;
+    so.morale = d.maxMorale;
+  }
+
+  /// Phân bổ 1 điểm chỉ số chưa dùng vào [stat]. Khi điểm cuối cùng được dùng hết, HP, năng lượng và tinh thần
+  /// hồi đầy tới mức tối đa MỚI (không hồi sau mỗi lần bấm khi còn điểm, không hồi khi chỉ mở hồ sơ).
+  static ActionResult allocateStat(GameState s, int id, MainStat stat) {
+    final blocked = _blocked(s);
+    if (blocked != null) return blocked;
+    final so = s.soldier(id);
+    if (so == null || !so.alive) {
+      return const ActionResult.fail('Không tìm thấy binh sĩ.');
+    }
+    if (so.statPoints <= 0) {
+      return const ActionResult.fail('Không còn điểm chỉ số.');
+    }
+    final before = vitalCaps(so);
+    switch (stat) {
+      case MainStat.strength:
+        so.stats[Stat.str] = so.stats[Stat.str]! + 1;
+      case MainStat.speed:
+        so.stats[Stat.dex] = so.stats[Stat.dex]! + 1;
+      case MainStat.build:
+        so.stats[Stat.con] = so.stats[Stat.con]! + 1;
+      case MainStat.attack:
+        so.atkPoints++;
+    }
+    so.statPoints--;
+    // Mức tối đa tính lại từ bốn chỉ số mới; giá trị hiện tại chỉ dịch theo phần chênh (không tự hồi đầy).
+    rebaseVitals(so, before);
+    return ActionResult.ok('${so.name} tăng ${mainStatNames[stat]}.');
+  }
+
+  /// HP / Thể lực / Tinh thần tối đa hiện tại của [so] (đã gồm trang bị). Gọi TRƯỚC khi đổi chỉ số/trang bị.
+  static VitalCaps vitalCaps(Soldier so) {
+    final d = deriveStats(so);
+    return VitalCaps(d.maxHp, d.maxEnergy, d.maxMorale);
+  }
+
+  /// Kẹp HP / Thể lực / Tinh thần của mọi binh sĩ và ứng viên về mức tối đa hiện tại (sau khi nạp save, khi công thức
+  /// hoặc trang bị làm mức tối đa thấp hơn giá trị đã lưu). Không bao giờ tăng giá trị.
+  static void clampVitals(GameState s) {
+    for (final so in [...s.soldiers, ...s.candidates]) {
+      // Đã chết / đào ngũ: giữ nguyên dữ liệu lịch sử.
+      if (so.status != SoldierStatus.active) continue;
+      final d = deriveStats(so);
+      if (so.hp > d.maxHp) so.hp = d.maxHp;
+      if (so.energy > d.maxEnergy) so.energy = d.maxEnergy;
+      if (so.morale > d.maxMorale) so.morale = d.maxMorale;
+    }
+  }
+
+  /// Áp chính sách bảo toàn giá trị hiện tại sau khi mức tối đa đổi (xem [rebaseCurrent]). [before] lấy từ
+  /// [vitalCaps] trước thay đổi. Tối đa tăng d thì hiện tại tăng d; tối đa giảm thì hiện tại bị kẹp.
+  static void rebaseVitals(Soldier so, VitalCaps before) {
+    final d = deriveStats(so);
+    so.hp = rebaseCurrent(so.hp, before.hp, d.maxHp);
+    so.energy = rebaseCurrent(so.energy, before.energy, d.maxEnergy);
+    so.morale = rebaseCurrent(so.morale, before.morale, d.maxMorale);
+  }
+
+  /// Loại binh sĩ đào ngũ vĩnh viễn khỏi gameplay: gỡ khỏi công trình, trả trang bị về kho (như sa thải, không
+  /// mất/nhân đôi), đánh dấu [SoldierStatus.deserted]. Chỉ tác động lên lính còn phục vụ nên gọi lặp vô hại.
+  /// Dữ liệu lịch sử (trận, hạ gục) được giữ. Lính này không còn trong [GameState.roster] nên không tính lương.
+  static bool desert(GameState s, Soldier so, {String? reason}) {
+    if (!so.alive) return false;
+    for (final slot in Slot.values) {
+      final item = so.equipped(slot);
+      if (item != null) {
+        s.inventory[item] = (s.inventory[item] ?? 0) + 1;
+        so.setEquipped(slot, null);
+      }
+    }
+    for (final f in s.facilities) {
+      f.assigned.remove(so.id);
+    }
+    so.status = SoldierStatus.deserted;
+    s.addLog(reason ?? '${so.name} đã đào ngũ.');
+    return true;
+  }
+
+  /// Tinh thần về 0 → đào ngũ. Trả về tên những người vừa bỏ đi.
+  static List<String> sweepBrokenMorale(GameState s) => [
+    for (final so in List.of(s.roster))
+      if (so.morale <= 0 &&
+          desert(s, so, reason: '${so.name} đào ngũ vì tinh thần cạn kiệt.'))
+        so.name,
+  ];
 
   // ---------- Kỹ năng & tài năng ----------
 
@@ -842,8 +1149,9 @@ class GameRules {
     if (skillPointsLeft(so) < cost) {
       return ActionResult.fail('Không đủ điểm kỹ năng (cần $cost).');
     }
+    final before = vitalCaps(so);
     so.skills[skillId] = cur + 1;
-    so.hp = min(so.hp, so.maxHp);
+    rebaseVitals(so, before);
     return ActionResult.ok('${so.name} học ${d.name} cấp ${cur + 1}.');
   }
 
@@ -866,46 +1174,24 @@ class GameRules {
     if (!openTalentTiers(so).contains(t.tier)) {
       return const ActionResult.fail('Mốc tài năng này đã được chọn.');
     }
+    final before = vitalCaps(so);
     so.talents.add(talentId);
-    so.hp = min(so.hp, so.maxHp);
+    rebaseVitals(so, before);
     return ActionResult.ok('${so.name} có tài năng ${t.name}.');
   }
 
   // ---------- Trang bị ----------
 
-  static ActionResult equip(GameState s, int id, String itemId) {
+  /// Trang bị [itemId] (mã tham chiếu trong kho) cho binh sĩ [id]; logic nằm ở [EquipmentService].
+  /// [slot] nếu truyền thì vật phẩm phải đúng ô đó.
+  static ActionResult equip(GameState s, int id, String itemId, {Slot? slot}) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
-    final so = s.soldier(id);
-    final item = itemDefs[itemId];
-    if (so == null || !so.alive || item == null) {
-      return const ActionResult.fail('Dữ liệu không hợp lệ.');
-    }
-    if ((s.inventory[itemId] ?? 0) <= 0) {
-      return const ActionResult.fail('Vật phẩm không còn trong kho.');
-    }
-    final problem = equipProblem(so, item);
-    if (problem != null) return ActionResult.fail(problem);
-    final old = so.equipped(item.slot);
-    s.inventory[itemId] = s.inventory[itemId]! - 1;
-    if (old != null) s.inventory[old] = (s.inventory[old] ?? 0) + 1;
-    so.setEquipped(item.slot, itemId);
-    so.hp = min(so.hp, so.maxHp);
-    return ActionResult.ok('${so.name} trang bị ${item.name}.');
+    return EquipmentService.equip(s, id, itemId, slot: slot);
   }
 
-  static ActionResult unequip(GameState s, int id, Slot slot) {
-    final so = s.soldier(id);
-    if (so == null || !so.alive) {
-      return const ActionResult.fail('Không tìm thấy binh sĩ.');
-    }
-    final old = so.equipped(slot);
-    if (old == null) return const ActionResult.fail('Ô trống.');
-    so.setEquipped(slot, null);
-    so.hp = min(so.hp, so.maxHp);
-    s.inventory[old] = (s.inventory[old] ?? 0) + 1;
-    return ActionResult.ok('Đã tháo ${itemDefs[old]!.name}.');
-  }
+  static ActionResult unequip(GameState s, int id, Slot slot) =>
+      EquipmentService.unequip(s, id, slot);
 
   static int itemPrice(GameState s, ItemDef it) {
     final disc = 1 - 0.05 * (level(s, Building.smithy) - 1).clamp(0, 2);
@@ -914,13 +1200,50 @@ class GameRules {
 
   // ---------- Thành phố và giao dịch ----------
 
+  /// Số vật phẩm trong kho đồ (đếm món, KHÔNG phải trọng lượng; dùng cho thống kê/kiểm thử).
   static int inventoryCount(GameState s) =>
       s.inventory.values.fold(0, (a, b) => a + b);
 
-  /// Sức chứa kho đồ: cơ bản theo Doanh trại + mỗi Hòm đồ thực tế đang có (tính lại từ state, không lưu số dư).
+  /// Trọng lượng (1/10 kg) của MỘT mã tham chiếu vật phẩm (0 nếu không tồn tại).
+  static int itemWeightTenths(String ref) =>
+      (EquipmentRules.weightOf(ref) * 10).round();
+
+  /// TRỌNG LƯỢNG RƯƠNG (1/10 kg) = Σ vật phẩm trong kho × số lượng + Σ tài nguyên vật liệu/lương thực.
+  /// Vàng không có trọng lượng. Trang bị đang đeo KHÔNG nằm trong rương. Mỗi mã tham chiếu chỉ tính một lần
+  /// (kho đồ là một bản đồ id → số lượng).
+  static int inventoryWeightTenths(GameState s) {
+    var w = 0;
+    for (final e in s.inventory.entries) {
+      if (e.value > 0) w += itemWeightTenths(e.key) * e.value;
+    }
+    for (final r in Res.values) {
+      w += WeightEconomy.ofResource(r, s.res[r] ?? 0);
+    }
+    return w;
+  }
+
+  /// Trọng lượng rương làm tròn lên kg nguyên để hiển thị `hiện tại/tối đa`.
+  static int inventoryWeightKg(GameState s) =>
+      WeightEconomy.displayKg(inventoryWeightTenths(s));
+
+  /// Sức chứa rương (1/10 kg): cơ bản + theo cấp Doanh trại + mỗi Hòm đồ thực tế đang có (tính lại từ state).
+  static int inventoryCapacityTenths(GameState s) => inventoryCapacity(s) * 10;
+
+  /// Sức chứa rương (kg nguyên).
   static int inventoryCapacity(GameState s) =>
-      inventoryCapacityFor(level(s, Building.barracks)) +
-      chestCount(s) * chestInventoryBonus;
+      WeightEconomy.capacityKg(level(s, Building.barracks), chestCount(s));
+
+  /// Lý do không thể thêm [addTenths] (1/10 kg) vào rương; null nếu được (hoặc nếu chỉ bớt đi). Phần thưởng nhiệm vụ,
+  /// chiến lợi phẩm và tài nguyên sản sinh KHÔNG đi qua kiểm tra này (không bao giờ bị mất); vượt sức chứa chỉ chặn
+  /// các việc tự nguyện làm nặng thêm (mua, tháo đồ).
+  static String? overloadReason(GameState s, int addTenths) {
+    if (addTenths <= 0) return null;
+    if (inventoryWeightTenths(s) + addTenths <= inventoryCapacityTenths(s)) {
+      return null;
+    }
+    return 'Rương quá tải (${inventoryWeightKg(s)}/${inventoryCapacity(s)} kg). '
+        'Bán bớt, dùng vật liệu hoặc nâng cấp Doanh trại / xây thêm Hòm đồ.';
+  }
 
   static int facilityCount(GameState s, FacilityType t) =>
       s.facilities.where((f) => f.type == t).length;
@@ -950,6 +1273,9 @@ class GameRules {
   /// * Quán rượu: không có hàng.
   static ShopStock dailyStock(GameState s, VendorDef v) {
     final items = <String, int>{};
+    int hashOf(String key) =>
+        (s.seed * 1000003 + s.day * 7919 + _stableHash('${v.id}/$key')) &
+        0x7fffffff;
     if (v.kind == VendorKind.smithy) {
       final pool = [
         for (final id in (v.items.keys.toList()..sort()))
@@ -960,12 +1286,17 @@ class GameRules {
       );
       pool.shuffle(r);
       for (final id in pool.take(smithyDailyPicks)) {
-        items[id] = v.items[id]!;
+        items[id] = MarketEconomy.dailyQuantity(v.items[id]!, hashOf(id));
       }
     }
     return ShopStock(
       items: items,
-      resources: v.kind == VendorKind.market ? Map.of(v.resources) : {},
+      resources: v.kind == VendorKind.market
+          ? {
+              for (final e in v.resources.entries)
+                e.key: MarketEconomy.dailyQuantity(e.value, hashOf(e.key.name)),
+            }
+          : {},
       lastRestock: s.day,
     );
   }
@@ -1001,11 +1332,11 @@ class GameRules {
   static int sellPrice(String itemId) =>
       max(1, (itemDefs[itemId]!.price * sellRatio).round());
 
+  /// Giá mua MỖI ĐƠN VỊ tài nguyên tại [v] và giá bán lại: một nguồn duy nhất ([MarketEconomy]).
   static int resourceBuyPrice(VendorDef v, Res r) =>
-      max(1, (resourceLotPrice[r]! * v.priceMult).round());
+      MarketEconomy.buyPrice(r, v.priceMult);
 
-  static int resourceSellPrice(Res r) =>
-      max(1, (resourceLotPrice[r]! * sellRatio).round());
+  static int resourceSellPrice(Res r) => MarketEconomy.sellPrice(r);
 
   /// Người bán mua lại loại đồ nào: chỉ Lò rèn mua trang bị (mọi loại, kể cả phụ kiện có từ trước).
   static bool buysItem(VendorDef v, ItemDef it) => v.kind == VendorKind.smithy;
@@ -1034,11 +1365,7 @@ class GameRules {
     if (town == null || loc == null) {
       return const ActionResult.fail('Không có thị trấn này.');
     }
-    if (!regionUnlocked(s, regionById(loc.regionId))) {
-      return ActionResult.fail(
-        '${loc.name} chưa mở cửa với bạn: hãy hoàn thành thêm nhiệm vụ.',
-      );
-    }
+    // Thành phố luôn mở: không khóa theo nhiệm vụ hay tiến độ.
     if (town.position.distanceTo(s.hero.position) > town.enterRadius) {
       return const ActionResult.fail('Bạn còn quá xa thị trấn.');
     }
@@ -1089,11 +1416,8 @@ class GameRules {
     final have = peekStock(s, v).items[itemId] ?? 0;
     if (have <= 0) return ActionResult.fail('${it.name} đã hết hàng.');
     if (qty > have) return ActionResult.fail('Chỉ còn $have ${it.name}.');
-    if (inventoryCount(s) + qty > inventoryCapacity(s)) {
-      return ActionResult.fail(
-        'Kho đồ đầy (${inventoryCount(s)}/${inventoryCapacity(s)}). Nâng cấp Doanh trại hoặc bán bớt.',
-      );
-    }
+    final over = overloadReason(s, itemWeightTenths(itemId) * qty);
+    if (over != null) return ActionResult.fail(over);
     final cost = {Res.coins: buyPrice(v, itemId) * qty};
     if (!canAfford(s, cost)) {
       return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
@@ -1164,84 +1488,87 @@ class GameRules {
     return ActionResult.ok('Đã bán $qty ${it.name}, nhận $gain vàng.');
   }
 
-  static ActionResult buyResourceLots(
+  static ActionResult buyResource(
     GameState s,
     String vendorId,
     Res res,
-    int lots,
+    int qty,
   ) {
     final v = vendorById(vendorId);
     final gate = _gate(s, v);
     if (gate != null) return gate;
     if (v!.kind != VendorKind.market ||
-        res == Res.coins ||
+        !MarketEconomy.tradable(res) ||
         !v.resources.containsKey(res)) {
       return ActionResult.fail(
         '${v.name} không bán ${resNames[res]!.toLowerCase()}.',
       );
     }
-    if (lots < 1 || lots > 99) {
+    if (qty < 1 || qty > 999) {
       return const ActionResult.fail('Số lượng không hợp lệ.');
     }
     final have = peekStock(s, v).resources[res] ?? 0;
-    if (have < lots) {
+    if (have < qty) {
       return ActionResult.fail(
         have == 0
             ? '${resNames[res]} đã hết hàng.'
-            : 'Chỉ còn $have lô ${resNames[res]!.toLowerCase()}.',
+            : 'Chỉ còn $have ${resNames[res]!.toLowerCase()}.',
       );
     }
-    final cost = {Res.coins: resourceBuyPrice(v, res) * lots};
+    final over = overloadReason(s, WeightEconomy.ofResource(res, qty));
+    if (over != null) return ActionResult.fail(over);
+    final cost = {Res.coins: resourceBuyPrice(v, res) * qty};
     if (!canAfford(s, cost)) {
       return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
     }
     spend(s, cost);
-    stockOf(s, v).resources[res] = have - lots;
-    grant(s, {res: lots * resourceLotSize});
+    stockOf(s, v).resources[res] = have - qty;
+    grant(s, {res: qty});
     s.tradeCount++;
     return ActionResult.ok(
-      'Đã mua ${lots * resourceLotSize} ${resNames[res]} với ${cost[Res.coins]} vàng.',
+      'Đã mua $qty ${resNames[res]!.toLowerCase()} với ${cost[Res.coins]} vàng.',
     );
   }
 
-  static ActionResult sellResourceLots(
+  static ActionResult sellResource(
     GameState s,
     String vendorId,
     Res res,
-    int lots,
+    int qty,
   ) {
     final v = vendorById(vendorId);
     final gate = _gate(s, v);
     if (gate != null) return gate;
     if (v!.kind != VendorKind.market ||
-        res == Res.coins ||
+        !MarketEconomy.tradable(res) ||
         !v.resources.containsKey(res)) {
       return ActionResult.fail(
         '${v.name} không mua ${resNames[res]!.toLowerCase()}.',
       );
     }
-    if (lots < 1 || lots > 99) {
+    if (qty < 1 || qty > 999) {
       return const ActionResult.fail('Số lượng không hợp lệ.');
     }
-    final units = lots * resourceLotSize;
-    if (s.res[res]! < units) {
+    if ((s.res[res] ?? 0) < qty) {
       return ActionResult.fail(
         'Bạn chỉ có ${s.res[res]} ${resNames[res]!.toLowerCase()}.',
       );
     }
     final room = v.resources[res]! * 2 - (peekStock(s, v).resources[res] ?? 0);
-    if (lots > room) {
+    if (qty > room) {
       return ActionResult.fail(
-        'Người bán không còn chỗ chứa thêm ${resNames[res]!.toLowerCase()}.',
+        'Người bán chỉ còn chỗ chứa thêm $room ${resNames[res]!.toLowerCase()}.',
       );
     }
-    final gain = resourceSellPrice(res) * lots;
-    _deduct(s, {res: units});
+    final gain = resourceSellPrice(res) * qty;
+    _deduct(s, {res: qty});
     final st = stockOf(s, v);
-    st.resources[res] = (st.resources[res] ?? 0) + lots;
+    st.resources[res] = (st.resources[res] ?? 0) + qty;
     grant(s, {Res.coins: gain});
     s.tradeCount++;
-    return ActionResult.ok('Đã bán $units ${resNames[res]}, nhận $gain vàng.');
+    return ActionResult.ok(
+      'Đã bán $qty ${resNames[res]!.toLowerCase()}, nhận $gain vàng.',
+    );
   }
 
   static ActionResult buy(GameState s, String itemId) {
@@ -1252,11 +1579,8 @@ class GameRules {
     if (it.tier > level(s, Building.smithy)) {
       return ActionResult.fail('Cần Lò rèn cấp ${it.tier}.');
     }
-    if (inventoryCount(s) >= inventoryCapacity(s)) {
-      return ActionResult.fail(
-        'Kho đồ đầy (${inventoryCount(s)}/${inventoryCapacity(s)}).',
-      );
-    }
+    final over = overloadReason(s, itemWeightTenths(itemId));
+    if (over != null) return ActionResult.fail(over);
     final cost = {Res.coins: itemPrice(s, it)};
     if (!canAfford(s, cost)) {
       return ActionResult.fail('Không đủ: ${_missing(s, cost)}.');
@@ -1273,39 +1597,41 @@ class GameRules {
       if (m.status == st) m,
   ];
 
-  static bool _available(GameState s, MissionTemplate t) {
-    if (s.tier < t.tierMin || s.tier > t.tierMax) return false;
-    if (s.missions.any(
-      (m) => m.templateId == t.id && m.status != MissionStatus.failed,
-    )) {
-      return false;
-    }
-    if (t.kind == MissionKind.clear && s.cleared.contains(t.locId)) {
-      return false;
-    }
-    if (t.kind == MissionKind.explore) {
-      final left = locations.where(
-        (l) =>
-            l.regionId == t.regionId &&
-            l.kind == LocKind.ruins &&
-            !s.explored.contains(l.id),
-      );
-      if (left.isEmpty) return false;
-    }
-    return true;
-  }
-
+  /// Bảng nhiệm vụ: luôn đủ [QuestGenerator.maxOffered] nhiệm vụ SĂN (chiến đấu trên bản đồ), độ khó theo sức
+  /// mạnh đội quân ([QuestGenerator.band]); sinh vô hạn, không có nhiệm vụ hành chính. Nhiệm vụ đang mời không
+  /// còn hợp độ khó (đội quân vừa mạnh lên) hoặc thuộc mẫu cũ bị bỏ khỏi bảng; nhiệm vụ đang làm không bị đụng.
   static void fillBoard(GameState s) {
     s.missions.removeWhere(
       (m) =>
           m.status == MissionStatus.failed ||
           (m.status == MissionStatus.completed && s.missions.length > 12),
     );
-    while (byStatus(s, MissionStatus.offered).length < 3) {
-      final pool = missionTemplates.where((t) => _available(s, t)).toList();
-      if (pool.isEmpty) break;
-      final t = pool[rng(s).nextInt(pool.length)];
-      s.missions.add(Mission(id: s.nextMissionId++, templateId: t.id));
+    final want = QuestGenerator.boardDifficulties(QuestGenerator.band(s));
+    final need = <int, int>{};
+    for (final d in want) {
+      need[d] = (need[d] ?? 0) + 1;
+    }
+    final offered = byStatus(s, MissionStatus.offered);
+    for (final m in offered) {
+      final t = templateById(m.templateId);
+      if (t.kind != MissionKind.hunt || (need[t.difficulty] ?? 0) <= 0) {
+        s.missions.remove(m);
+      } else {
+        need[t.difficulty] = need[t.difficulty]! - 1;
+      }
+    }
+    var gold = 0, red = 0;
+    for (final m in byStatus(s, MissionStatus.offered)) {
+      templateById(m.templateId).color == MissionColor.gold ? gold++ : red++;
+    }
+    for (final e in need.entries) {
+      for (var i = 0; i < e.value; i++) {
+        final color = gold <= red ? 'gold' : 'red';
+        color == 'gold' ? gold++ : red++;
+        s.missions.add(
+          Mission(id: s.nextMissionId++, templateId: 'hunt_${color}_${e.key}'),
+        );
+      }
     }
   }
 
@@ -1330,10 +1656,48 @@ class GameRules {
           MissionKind.levelCount ||
           MissionKind.gearCount:
         return giver;
+      case MissionKind.hunt:
+        return null; // điểm giao chiến được tạo khi nhận nhiệm vụ (xem acceptMission)
     }
   }
 
   /// Chỉ nhận được khi nhân vật đang ở trong một thành trấn (đã vào thành, `visiting` khác null).
+  /// Lý do KHÔNG nhận được nhiệm vụ [m] lúc này (null = nhận được). Dùng cho nút "Nhận" ở giao diện; luật thật vẫn
+  /// kiểm tra lại trong [acceptMission] nên bấm khi bị khóa hay gọi trực tiếp đều không vượt giới hạn.
+  static String? acceptBlockReason(GameState s, Mission m) {
+    final town = s.visiting == null ? null : locationById(s.visiting!);
+    if (m.status != MissionStatus.offered) {
+      return m.status == MissionStatus.active
+          ? 'Nhiệm vụ này đã được nhận.'
+          : 'Nhiệm vụ không còn.';
+    }
+    if (town == null || town.kind != LocKind.city) {
+      return 'Chỉ nhận nhiệm vụ khi đang ở trong thành trấn.';
+    }
+    if (byStatus(s, MissionStatus.active).length >= maxActiveMissions) {
+      return 'Đã nhận đủ $maxActiveMissions nhiệm vụ. Hoàn thành hoặc bỏ bớt một nhiệm vụ để nhận thêm.';
+    }
+    return null;
+  }
+
+  /// Sau khi nạp save: không có quá [maxActiveMissions] nhiệm vụ đang làm. Phần dư (id lớn nhất) được trả về bảng
+  /// nhiệm vụ ở trạng thái chưa nhận (không mất nhiệm vụ, không trao thưởng). Idempotent.
+  static void sanitizeMissions(GameState s) {
+    final active = byStatus(s, MissionStatus.active)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    for (final m in active.skip(maxActiveMissions)) {
+      m
+        ..status = MissionStatus.offered
+        ..deadline = 0
+        ..days = 0
+        ..progress = 0
+        ..giverTown = null
+        ..targetId = null
+        ..encounter = null
+        ..squad.clear();
+    }
+  }
+
   static ActionResult acceptMission(GameState s, int id) {
     final blocked = _blocked(s);
     if (blocked != null) return blocked;
@@ -1347,14 +1711,45 @@ class GameRules {
     if (m == null || m.status != MissionStatus.offered) {
       return const ActionResult.fail('Nhiệm vụ không còn.');
     }
-    if (byStatus(s, MissionStatus.active).length >= 3) {
-      return const ActionResult.fail('Chỉ nhận tối đa 3 nhiệm vụ cùng lúc.');
+    if (byStatus(s, MissionStatus.active).length >= maxActiveMissions) {
+      return const ActionResult.fail(
+        'Chỉ nhận tối đa $maxActiveMissions nhiệm vụ cùng lúc.',
+      );
     }
     final t = templateById(m.templateId);
+    String? target;
+    Encounter? enc;
+    if (t.kind == MissionKind.hunt) {
+      // Nhận nhiệm vụ săn = tạo đúng MỘT điểm giao chiến thật trên bản đồ, gắn id ổn định với nhiệm vụ.
+      enc = QuestGenerator.createEncounter(s, t.difficulty, rng(s));
+      if (enc == null) {
+        return const ActionResult.fail(
+          'Không còn điểm giao chiến hợp lệ trên bản đồ.',
+        );
+      }
+      target = QuestGenerator.idFor(m.id);
+    } else {
+      target = objectiveFor(s, t, town.id);
+    }
+    // Thời hạn riêng: random đúng một lần ở đây (rng của ván nên xác định theo seed), rồi chỉ đọc lại từ m.days/deadline.
+    var travelDays = 0;
+    if (enc != null) {
+      final est = MovementRules.estimate(
+        worldMap,
+        s.hero.position,
+        WPoint(enc.x, enc.y),
+      );
+      travelDays = (est.cost / TerrainRules.maxStamina).ceil();
+    }
+    final days = t.kind == MissionKind.hunt
+        ? QuestGenerator.rollDays(rng(s), travelDays: travelDays)
+        : t.days;
     m.status = MissionStatus.active;
-    m.deadline = s.day + t.days;
+    m.days = days;
+    m.deadline = s.day + days;
     m.giverTown = town.id;
-    m.targetId = objectiveFor(s, t, town.id);
+    m.encounter = enc;
+    m.targetId = target;
     m.progress = (t.kind == MissionKind.clear && s.cleared.contains(t.locId))
         ? 1
         : 0;
@@ -1367,8 +1762,8 @@ class GameRules {
   static Mission? trackedMission(GameState s) {
     Mission? best;
     for (final m in byStatus(s, MissionStatus.active)) {
-      if (s.day > m.deadline || m.targetId == null) continue;
-      if (worldMap.positionOf(m.targetId!) == null) continue;
+      if (remainingDays(s, m) <= 0 || m.targetId == null) continue;
+      if (targetPosition(s, m.targetId!) == null) continue;
       if (best == null ||
           m.deadline < best.deadline ||
           (m.deadline == best.deadline && m.id < best.id)) {
@@ -1378,10 +1773,61 @@ class GameRules {
     return best;
   }
 
+  /// Vị trí thế giới của mục tiêu [id]: thị trấn/điểm cố định của bản đồ, hoặc điểm giao chiến của nhiệm vụ săn đang làm.
+  static WPoint? targetPosition(GameState s, String id) {
+    final fixed = worldMap.positionOf(id);
+    if (fixed != null) return fixed;
+    final m = _encounterMission(s, id);
+    return m == null ? null : WPoint(m.encounter!.x, m.encounter!.y);
+  }
+
+  static Mission? _encounterMission(GameState s, String id) {
+    for (final m in s.missions) {
+      if (m.status == MissionStatus.active &&
+          m.encounter != null &&
+          m.targetId == id) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  /// Địa điểm theo id: điểm cố định của catalog hoặc điểm giao chiến của nhiệm vụ săn đang làm (null nếu không có).
+  static LocationDef? locationFor(GameState s, String id) {
+    final fixed = locationById(id);
+    if (fixed != null) return fixed;
+    final m = _encounterMission(s, id);
+    return m == null ? null : QuestGenerator.locationOf(m, m.encounter!);
+  }
+
+  /// Các điểm không phải thành phố hiển thị trên bản đồ, đọc từ state thật (không dựa trên icon hay biến UI):
+  /// - điểm cố định đã biết, TRỪ điểm đã hoàn thành (trại đã quét sạch, tàn tích đã khám phá) — điểm xong biến mất hẳn,
+  ///   không để lại vòng tròn dấu tích; ngoại lệ: còn nhiệm vụ đang làm trỏ tới nó thì vẫn hiện để báo cáo;
+  /// - điểm giao chiến của mỗi nhiệm vụ săn ĐANG làm (nhiệm vụ xong/bỏ/hết hạn thì không còn điểm nào).
+  static List<LocationDef> mapPoints(GameState s) {
+    final targeted = <String>{
+      for (final m in byStatus(s, MissionStatus.active))
+        if (m.targetId != null && remainingDays(s, m) > 0) m.targetId!,
+    };
+    final out = <LocationDef>[];
+    for (final l in visibleLocations(s)) {
+      if (l.kind == LocKind.city) continue;
+      final done = s.cleared.contains(l.id) || s.explored.contains(l.id);
+      if (done && !targeted.contains(l.id)) continue;
+      out.add(l);
+    }
+    for (final id in targeted) {
+      if (out.any((l) => l.id == id)) continue;
+      final l = locationFor(s, id);
+      if (l != null && l.kind != LocKind.city) out.add(l);
+    }
+    return out;
+  }
+
   /// Nhiệm vụ đang thực hiện còn hạn có mục tiêu tại địa điểm [locId].
   static List<Mission> activeAt(GameState s, String locId) => [
     for (final m in byStatus(s, MissionStatus.active))
-      if (m.targetId == locId && s.day <= m.deadline) m,
+      if (m.targetId == locId && remainingDays(s, m) > 0) m,
   ];
 
   static ActionResult abandonMission(GameState s, int id) {
@@ -1409,7 +1855,8 @@ class GameRules {
     return switch (t.kind) {
       MissionKind.clear ||
       MissionKind.explore ||
-      MissionKind.visit => m.progress,
+      MissionKind.visit ||
+      MissionKind.hunt => m.progress,
       MissionKind.deliver => s.res[t.res!]!,
       MissionKind.levelCount =>
         s.roster.where((x) => x.level >= t.level).length,
@@ -1421,9 +1868,12 @@ class GameRules {
   }
 
   static int missionTarget(MissionTemplate t) => switch (t.kind) {
-    MissionKind.clear || MissionKind.visit => 1,
+    MissionKind.clear || MissionKind.visit || MissionKind.hunt => 1,
     _ => t.amount,
   };
+
+  /// Số ngày còn lại của nhiệm vụ (<= 0: đã hết hạn). Suy ra từ `state.day`, nên chỉ đổi khi qua ngày thật sự.
+  static int remainingDays(GameState s, Mission m) => m.deadline - s.day;
 
   static bool missionReady(GameState s, Mission m) =>
       m.status == MissionStatus.active &&
@@ -1436,7 +1886,7 @@ class GameRules {
     if (m == null || m.status != MissionStatus.active) {
       return const ActionResult.fail('Nhiệm vụ không hoạt động.');
     }
-    if (s.day > m.deadline) {
+    if (remainingDays(s, m) <= 0) {
       return const ActionResult.fail('Nhiệm vụ đã hết hạn.');
     }
     if (!missionReady(s, m)) {
@@ -1447,7 +1897,7 @@ class GameRules {
 
   /// Chốt hoàn thành và trao thưởng ĐÚNG MỘT LẦN (chốt bằng `status` + `rewarded`). Mọi thay đổi state
   /// diễn ra sau khi mọi điều kiện đã kiểm tra, nên không có trạng thái trao dở dang.
-  static ActionResult _settle(GameState s, Mission m) {
+  static ActionResult _settle(GameState s, Mission m, {QuestPayout? payout}) {
     if (m.rewarded || m.status != MissionStatus.active) {
       return const ActionResult.fail('Nhiệm vụ đã được trao thưởng.');
     }
@@ -1458,24 +1908,39 @@ class GameRules {
     m.rewarded = true;
     m.status = MissionStatus.completed;
     m.targetId = null;
-    grant(s, t.rewardRes);
-    if (t.rewardItem != null) {
-      s.inventory[t.rewardItem!] = (s.inventory[t.rewardItem!] ?? 0) + 1;
+    // Phần thưởng: phần xác định (vàng/lương/uy tín/EXP) + phần ngẫu nhiên (tài nguyên đa dạng, trang bị)
+    // rút từ rng của ván. Chốt `rewarded` ở trên bảo đảm chỉ rút/trao đúng một lần.
+    final reward = QuestEconomy.of(t);
+    final extras = QuestEconomy.rollExtras(rng(s), t, s.res);
+    final granted = <Res, int>{...reward.res};
+    for (final e in extras.res.entries) {
+      granted[e.key] = (granted[e.key] ?? 0) + e.value;
     }
-    if (t.rewardSat > 0) addSacredWill(s, t.rewardSat);
+    grant(s, granted);
+    payout?.res.addAll(granted);
+    final itemRef = t.rewardItem != null
+        ? EquipmentService.mint(s, t.rewardItem!)
+        : (extras.itemDesign != null
+              ? EquipmentService.mint(s, extras.itemDesign!)
+              : null);
+    if (itemRef != null) payout?.items.add(itemRef);
+    if (reward.sat > 0) addSacredWill(s, reward.sat);
+    payout?.sat = reward.sat;
     final exp = <String>[];
-    if (t.rewardExp > 0) {
+    if (reward.exp > 0) {
       final ids = [
         for (final id in m.squad)
           if (s.soldier(id)?.alive == true) id,
       ];
-      final who = ids.isEmpty
-          ? s.roster
-          : [for (final id in ids) s.soldier(id)!];
+      // Chỉ người thật sự ở trong đội hoàn thành mục tiêu và còn phục vụ. Đội đã chết/đào ngũ hết thì KHÔNG ai nhận
+      // (trước đây rơi về cả roster, thưởng cho cả quân dự bị không tham chiến).
+      final who = [for (final id in ids) s.soldier(id)!];
       for (final so in who) {
-        final ups = addXp(so, t.rewardExp);
+        final ups = addXp(so, reward.exp);
         if (ups > 0) exp.add('${so.name} lên cấp ${so.level}');
+        if (ups > 0) payout?.levelUps.add('${so.name} lên cấp ${so.level}');
       }
+      payout?.exp = who.isEmpty ? 0 : reward.exp;
     }
     s.missionsCompleted++;
     s.addLog('Hoàn thành ${t.title}.');
@@ -1487,10 +1952,10 @@ class GameRules {
     }
     fillBoard(s);
     final parts = <String>[
-      if (t.rewardRes.isNotEmpty) describeCost(t.rewardRes),
-      if (t.rewardItem != null) itemDefs[t.rewardItem]!.name,
-      if (t.rewardExp > 0) '${t.rewardExp} EXP/người',
-      if (t.rewardSat > 0) 'Thánh ý +${t.rewardSat}',
+      if (granted.isNotEmpty) describeCost(granted),
+      if (itemRef != null) itemDisplayName(itemRef),
+      if (reward.exp > 0) '${reward.exp} EXP/người',
+      if (reward.sat > 0) 'Uy tín +${reward.sat}',
     ];
     return ActionResult.ok(
       'Hoàn thành ${t.title}. Nhận ${parts.join(', ')}.'
@@ -1530,10 +1995,14 @@ class GameRules {
     // Qua một ngày = nghỉ ngơi: thể lực của nhân vật hồi đầy (cơ chế hồi phục duy nhất).
     s.hero.stamina = TerrainRules.maxStamina;
 
-    final n = s.roster.length;
-    final paid = s.res[Res.food]! >= n && s.res[Res.coins]! >= n;
-    final paidFood = min(s.res[Res.food]!, n);
-    final paidCoins = min(s.res[Res.coins]!, n);
+    // Chi phí duy trì theo cấp từng binh sĩ còn phục vụ; trừ đúng một lần cho mỗi lần qua ngày.
+    // Thiếu thì trả phần có thể trả, tinh thần cả quân giảm (không giết/xóa lính vì thiếu tiền).
+    final upkeep = UpkeepEconomy.forSoldiers(s.roster);
+    final dueFood = upkeep[Res.food]!;
+    final dueCoins = upkeep[Res.coins]!;
+    final paid = s.res[Res.food]! >= dueFood && s.res[Res.coins]! >= dueCoins;
+    final paidFood = min(s.res[Res.food]!, dueFood);
+    final paidCoins = min(s.res[Res.coins]!, dueCoins);
     s.res[Res.food] = s.res[Res.food]! - paidFood;
     s.res[Res.coins] = s.res[Res.coins]! - paidCoins;
     if (ledgerOut != null) {
@@ -1543,25 +2012,31 @@ class GameRules {
     if (!paid) {
       lines.add('Không đủ lương thực/vàng trả cho quân đội! Tinh thần giảm.');
       for (final so in s.roster) {
-        so.morale = max(0, so.morale - 8);
+        so.morale = max(0, so.morale + scaleVital(-8, moraleCap(so)));
       }
-    } else {
-      final target = 70 + 5 * level(s, Building.tavern);
+    } else if (level(s, Building.tavern) > 0) {
+      // Quán rượu nâng mức Tinh thần cân bằng (70% + 5% mỗi cấp Quán rượu của mức tối đa, ±2%/ngày) cho lính đang
+      // nghỉ trong Doanh trại. Lính nhàn rỗi / ở công trình khác KHÔNG hưởng; chưa xây Quán rượu thì không có.
+      final pct = 0.70 + 0.05 * level(s, Building.tavern);
       for (final so in s.roster) {
+        if (facilityOf(s, so.id)?.type != FacilityType.barracks) continue;
+        final cap = moraleCap(so);
+        final target = (cap * pct).round();
+        final step = scaleVital(2, cap).abs();
         so.morale = so.morale < target
-            ? min(target, so.morale + 2)
-            : max(target, so.morale - 2);
+            ? min(target, so.morale + step)
+            : max(target, so.morale - step);
       }
     }
 
-    for (final so in s.roster) {
-      if (so.morale <= 15 && rng(s).nextDouble() < 0.25) {
-        so.status = SoldierStatus.deserted;
-        for (final f in s.facilities) {
-          f.assigned.remove(so.id);
-        }
+    for (final name in sweepBrokenMorale(s)) {
+      lines.add('$name bỏ trốn vì tinh thần cạn kiệt.');
+    }
+    for (final so in List.of(s.roster)) {
+      if (so.morale <= desertMoraleFraction * moraleCap(so) &&
+          rng(s).nextDouble() < 0.25) {
+        desert(s, so);
         lines.add('${so.name} bỏ trốn vì kiệt quệ tinh thần.');
-        s.addLog('${so.name} đã đào ngũ.');
       }
     }
 
@@ -1570,18 +2045,19 @@ class GameRules {
       final f = facilityOf(s, so.id);
       final maxHp = so.maxHp;
       if (so.hp > maxHp) so.hp = maxHp;
-      if (so.hp < maxHp) {
-        final heal = _infirmaryHeal(f?.type);
-        so.hp = heal != null
-            ? min(maxHp, so.hp + heal)
-            : min(maxHp, so.hp + max(1, (maxHp * restHealFraction).round()));
+      // HP chỉ hồi ở công trình có hiệu ứng HP (Lều cứu thương, theo cấp hiệu ứng); ngoài đó KHÔNG tự hồi.
+      final heal = _infirmaryHeal(f?.type);
+      if (heal != null && so.hp < maxHp) {
+        so.hp = min(maxHp, so.hp + heal);
         if (so.hp >= maxHp) lines.add('${so.name} đã hồi phục hoàn toàn.');
       }
-      _applyDailyPoints(
-        so,
-        f?.type ??
-            (level(s, Building.barracks) > 0 ? FacilityType.barracks : null),
-      );
+      if (so.needsTreatment && so.hp * 2 >= maxHp) {
+        so.needsTreatment = false;
+        lines.add('${so.name} đã được chữa trị, sẵn sàng ra trận.');
+      }
+      // Thể lực / Tinh thần chỉ đổi do công trình mà lính ĐƯỢC BỐ TRÍ vào, theo hiệu ứng của chính công trình đó.
+      // Lính nhàn rỗi (không ở công trình nào) KHÔNG tự hồi. Mỗi lính ở tối đa một công trình nên không hồi trùng.
+      _applyDailyPoints(so, f?.type);
       // Luyện thành thạo vũ khí tại bãi tập (chỉ nhóm vũ khí hợp bãi, và chỉ tới bậc huấn luyện tối đa).
       final fdef = f == null ? null : facilityDefs[f.type];
       final wt = so.weaponId == null ? null : itemDefs[so.weaponId]?.weaponType;
@@ -1592,28 +2068,36 @@ class GameRules {
           );
         }
       }
-      final st = f == null ? null : facilityDefs[f.type]!.trains;
-      if (f != null && st != null) {
-        if (so.stats[st]! >= statCap(so)) {
+      // Huấn luyện: mỗi chỉ số `++`/`+` của công trình tích tiến độ theo cấp công trình (xem [trainingRates]).
+      // Tiến độ lưu nguyên (số nguyên phần trăm) trong [Soldier.train]; đạt 100 thì +1 điểm và giữ phần dư.
+      if (f != null) {
+        final rates = trainingRates(f.type, f.level);
+        final open = [
+          for (final e in rates.entries)
+            if (so.stats[e.key]! < statCap(so)) e.key,
+        ];
+        if (rates.isNotEmpty && open.isEmpty) {
           f.assigned.remove(so.id);
           lines.add(
-            '${so.name} đã đạt giới hạn ${statNames[st]} ở cấp này và rời ${facilityDefs[f.type]!.name}.',
+            '${so.name} đã đạt giới hạn chỉ số ở cấp này và rời ${facilityDefs[f.type]!.name}.',
           );
-        } else {
+        }
+        final capsBefore = vitalCaps(so);
+        for (final st in open) {
           final rate =
-              (trainPercentPerDay *
-                      (so.trait == TraitId.quickLearner ? 1.3 : 1.0))
+              (rates[st]! * (so.trait == TraitId.quickLearner ? 1.3 : 1.0))
                   .round();
           so.train[st] = so.train[st]! + rate;
-          while (so.train[st]! >= 100) {
+          while (so.train[st]! >= 100 && so.stats[st]! < statCap(so)) {
             so.train[st] = so.train[st]! - 100;
             so.stats[st] = so.stats[st]! + 1;
-            final ups = addXp(so, trainingXp);
-            lines.add(
-              '${so.name} tăng ${statNames[st]} lên ${so.stats[st]}${ups > 0 ? ' và lên cấp ${so.level}' : ''}.',
-            );
+            lines.add('${so.name} tăng ${statNames[st]} lên ${so.stats[st]}.');
+          }
+          if (so.stats[st]! >= statCap(so)) {
+            so.train[st] = min(so.train[st]!, 99);
           }
         }
+        rebaseVitals(so, capsBefore);
       }
     }
 
@@ -1621,30 +2105,44 @@ class GameRules {
     restockShops(s);
     refreshCandidates(s); // danh sách ứng viên của Quán rượu làm mới mỗi ngày
 
+    // Hết hạn = tự hủy, KHÔNG phạt (không trừ tài nguyên/hài lòng, không thưởng). Xóa hẳn nhiệm vụ nên điểm giao chiến
+    // (suy ra từ nhiệm vụ) và slot cũng biến mất cùng lúc. Chạy sau lương/hồi phục để hết hạn không đổi các khoản đó.
     for (final m in byStatus(s, MissionStatus.active)) {
-      if (s.day > m.deadline && !missionReady(s, m)) {
+      if (!m.rewarded && remainingDays(s, m) <= 0) {
         final t = templateById(m.templateId);
-        m.status = MissionStatus.failed;
-        _addSat(s, -t.penaltySat);
-        lines.add(
-          'Quá hạn nhiệm vụ "${t.title}": nhà vua giảm ${t.penaltySat} hài lòng.',
-        );
-        s.addLog('Thất bại nhiệm vụ ${t.title}.');
-      } else if (s.day > m.deadline) {
-        m.status = MissionStatus.failed;
-        final t = templateById(m.templateId);
-        _addSat(s, -t.penaltySat);
-        lines.add(
-          'Bạn không nộp "${t.title}" kịp hạn: nhà vua giảm ${t.penaltySat} hài lòng.',
-        );
+        if (t.kind == MissionKind.hunt) {
+          s.missions.remove(m);
+          lines.add(
+            'Nhiệm vụ "${t.title}" đã hết hạn và bị hủy vì quá thời gian.',
+          );
+          s.addLog('Nhiệm vụ ${t.title} hết hạn, tự hủy.');
+        } else {
+          // Mẫu hành chính cũ (không còn được sinh ra): giữ luật phạt hài lòng như trước.
+          m.status = MissionStatus.failed;
+          _addSat(s, -t.penaltySat);
+          lines.add(
+            'Quá hạn nhiệm vụ "${t.title}": nhà vua giảm ${t.penaltySat} hài lòng.',
+          );
+          s.addLog('Thất bại nhiệm vụ ${t.title}.');
+        }
       }
     }
     fillBoard(s);
+    final rescue = _maybeRelief(s);
+    if (rescue != null) lines.add(rescue);
     if (s.gameOver) {
       lines.add('Nhà vua đã mất hết kiên nhẫn. Bạn bị cách chức.');
     }
+    final report = DayReport(
+      stipend: stipend,
+      upkeep: upkeep,
+      paidUpkeep: {Res.coins: paidCoins, Res.food: paidFood},
+      paid: paid,
+      lines: lines,
+    );
     dayHook?.call(s);
-    return DayReport(stipend: stipend, upkeep: n, paid: paid, lines: lines);
+    dayReportHook?.call(s, report);
+    return report;
   }
 
   /// HP hồi mỗi ngày nếu [t] có hiệu ứng HP (Lều cứu thương); null nếu không.
@@ -1662,9 +2160,13 @@ class GameRules {
     for (final e in effectsOf(t)) {
       switch (e.stat) {
         case EffectStat.energy:
-          so.energy = (so.energy + pointsPerDay[e.level]!).clamp(0, maxEnergy);
+          final cap = energyCap(so);
+          so.energy = (so.energy + scaleVital(pointsPerDay[e.level]!, cap))
+              .clamp(0, cap);
         case EffectStat.morale:
-          so.morale = (so.morale + moralePerDay[e.level]!).clamp(0, 100);
+          final cap = moraleCap(so);
+          so.morale = (so.morale + scaleVital(moralePerDay[e.level]!, cap))
+              .clamp(0, cap);
         default:
           break;
       }
@@ -1677,7 +2179,8 @@ class GameRules {
 
   static List<LocationDef> visibleLocations(GameState s) => [
     for (final l in locations)
-      if (regionUnlocked(s, regionById(l.regionId)) &&
+      if (l.kind != LocKind.resource &&
+          regionUnlocked(s, regionById(l.regionId)) &&
           (s.discovered.contains(l.id) ||
               (l.startsDiscovered &&
                   regionUnlocked(s, regionById(l.regionId)))))
@@ -1719,6 +2222,16 @@ class GameRules {
     return ActionResult.ok('Trinh sát mất 1 ngày và phát hiện: ${l.name}.');
   }
 
+  /// Mô tả chiến lợi phẩm kỳ vọng của một trại địch, tính từ chính các kẻ địch sẽ gặp (cấp và trang bị).
+  static String lootPreview(LocationDef loc) {
+    final foes = previewEnemies(loc.enemies);
+    final coins = LootEconomy.expectedCoins(foes).round();
+    final gear = LootEconomy.expectedGearDrops(foes);
+    return '~$coins vàng, tài nguyên ngẫu nhiên'
+        '${gear >= 0.05 ? ', trang bị rơi theo xác suất' : ''}'
+        '${loc.lootItem != null ? ' + ${itemDefs[loc.lootItem]!.name}' : ''}';
+  }
+
   static Soldier buildEnemy(GameState s, EnemySpec spec, int index) =>
       _buildEnemy(rng(s), spec, index);
 
@@ -1726,7 +2239,10 @@ class GameRules {
     final lvl = spec.level;
     final stats = {
       for (final st in Stat.values)
-        st: _base[spec.role]![st]! + (lvl - 1) * 2 ~/ 1 + r.nextInt(2),
+        st:
+            roleBaseStats[spec.role]![st]! +
+            StatFormulas.enemyLevelBonus(lvl) +
+            r.nextInt(StatFormulas.startSpread),
     };
     String weapon;
     String armor;
@@ -1752,9 +2268,12 @@ class GameRules {
       level: lvl,
       weaponId: weapon,
       armorId: armor,
-      morale: 60,
+      atkPoints:
+          roleBaseAttack[spec.role]! +
+          StatFormulas.enemyLevelBonus(lvl) +
+          r.nextInt(StatFormulas.startSpread),
     );
-    e.hp = deriveStats(e).maxHp;
+    fillVitals(e);
     return e;
   }
 
@@ -1812,14 +2331,36 @@ class GameRules {
     final won = rep.winner == Winner.player;
     final out = <Casualty>[];
     var deaths = 0;
+    // XP chia theo sát thương hợp lệ đã gây (xem [distributeBattleXp]); chỉ người tham chiến có mặt trong báo cáo.
+    final xpShare = distributeBattleXp(
+      {
+        for (final so in squad)
+          if (rep.outcomes[so.id] != null) so.id: rep.outcomes[so.id]!.dealt,
+      },
+      {for (final u in rep.enemyUnits) u.id: (maxHp: u.maxHp, level: u.level)},
+    );
     for (final so in squad) {
       final o = rep.outcomes[so.id]!;
+      final energyBefore = so.energy;
+      final moraleBefore = so.morale;
       so.battles++;
       so.kills += o.kills;
       var kind = CasualtyKind.survived;
-      for (final f in s.facilities) {
-        f.assigned.remove(so.id);
+      // Chỉ người tử trận rời công trình (đào ngũ đã tự gỡ trong [desert]); người sống GIỮ nguyên chỗ được gán.
+      if (o.dead) {
+        for (final f in s.facilities) {
+          f.assigned.remove(so.id);
+        }
       }
+      // Thể trạng sau trận: chỉ người đã ra trận mới mất năng lượng; tinh thần theo sát thương nhận.
+      so.energy = max(
+        0,
+        so.energy -
+            battleEnergyCost(so, seconds: o.activeSeconds, swings: o.swings),
+      );
+      so.morale = o.finalMorale?.clamp(0, moraleCap(so)) ?? so.morale;
+      var xp = 0;
+      var ups = 0;
       if (o.dead) {
         so.status = SoldierStatus.dead;
         so.hp = 0;
@@ -1827,15 +2368,17 @@ class GameRules {
         deaths++;
         s.fallenTotal++;
         s.addLog('${so.name} tử trận.');
+      } else if (o.fled) {
+        // Tinh thần về 0 giữa trận: bỏ chạy, đào ngũ vĩnh viễn; không XP.
+        so.hp = o.finalHp.clamp(1, so.maxHp);
+        desert(s, so, reason: '${so.name} bỏ chạy khỏi trận và đào ngũ.');
+        kind = CasualtyKind.deserted;
       } else {
         so.hp = o.finalHp.clamp(1, so.maxHp);
         if (so.hp < so.maxHp * 0.5) kind = CasualtyKind.wounded;
-      }
-      var xp = 0;
-      var ups = 0;
-      if (kind != CasualtyKind.dead) {
-        xp = 12 + 5 * o.kills + (won ? 15 : 0);
-        ups = addXp(so, xp);
+        final base = xpShare[so.id] ?? 0;
+        xp = xpGainFor(so, base); // số XP thật sự nhận (đã gồm Học nhanh), để màn kết quả hiển thị đúng
+        ups = addXp(so, base);
         // Thành thạo nhóm vũ khí đang cầm: chỉ tăng nhờ số đòn trúng thật trong trận.
         final wt = deriveStats(so).weaponType;
         if (wt != null) {
@@ -1853,17 +2396,60 @@ class GameRules {
             );
           }
         }
-        so.morale = (so.morale + (won ? 8 : -10)).clamp(0, 100);
+        so.morale = (so.morale + scaleVital(won ? 8 : -10, moraleCap(so)))
+            .clamp(0, moraleCap(so));
       }
-      out.add(Casualty(so.id, so.name, kind, xp: xp, levelUps: ups));
+      out.add(
+        Casualty(
+          so.id,
+          so.name,
+          kind,
+          xp: xp,
+          levelUps: ups,
+          energyBefore: energyBefore,
+          moraleBefore: moraleBefore,
+          levelAfter: so.level,
+          statPointsAfter: so.statPoints,
+          fled: o.fled,
+        ),
+      );
     }
     if (deaths > 0) {
       for (final so in s.roster) {
         so.morale = max(
           0,
-          so.morale - (squad.contains(so) ? 6 : 4) * deaths.clamp(1, 3),
+          so.morale +
+              scaleVital(
+                -(squad.contains(so) ? 6 : 4) * deaths.clamp(1, 3),
+                moraleCap(so),
+              ),
         );
       }
+    }
+    // Lính vừa lên cấp trong trận này: các khoản trừ thể trạng/tinh thần sau trận ở trên diễn ra SAU khi nhận EXP, nên
+    // hồi đầy lại ở đây để ngay sau khi lên cấp cả ba chỉ số đúng bằng mức tối đa mới.
+    for (var i = 0; i < out.length; i++) {
+      if (out[i].levelUps <= 0) continue;
+      final so = s.soldier(out[i].id);
+      if (so == null || !so.alive) continue;
+      restoreVitalsFull(so);
+      if (out[i].kind == CasualtyKind.wounded) {
+        out[i] = out[i].copyWith(kind: CasualtyKind.survived);
+      }
+    }
+    // Tinh thần về 0 sau trận (kể cả do thương vong) → đào ngũ, đúng một lần.
+    for (final so in List.of(s.roster)) {
+      if (so.morale <= 0) {
+        desert(s, so, reason: '${so.name} đào ngũ vì tinh thần cạn kiệt.');
+        final i = out.indexWhere((c) => c.id == so.id);
+        if (i >= 0) out[i] = out[i].copyWith(kind: CasualtyKind.deserted);
+      }
+    }
+    // Chốt số liệu SAU cùng (đã gồm phạt thương vong/đào ngũ) một lần, để màn kết quả đọc ảnh chụp thay vì state sống.
+    for (var i = 0; i < out.length; i++) {
+      final so = s.soldier(out[i].id);
+      if (so == null) continue;
+      out[i] = out[i].copyWith(energyAfter: so.energy, moraleAfter: so.morale);
     }
     if (won) {
       s.battlesWon++;
@@ -1875,7 +2461,59 @@ class GameRules {
 
   // ---------- Viễn chinh ----------
 
+  /// Xuất quân và giải quyết trận (nguyên tử). Đội xuất quân RỜI công trình trong lúc đi (không hưởng hiệu ứng công
+  /// trình ở xa) và khi xong, người còn sống được TRẢ VỀ đúng công trình/thứ tự trước khi đi (kể cả khi chuyến đi thất
+  /// bại hay thua trận). Vị trí đứng tự do trong trại ([Soldier.campX]/[Soldier.campY]) không bị đụng tới. Người
+  /// tử trận / đào ngũ thì không được trả về.
   static ExpeditionResult sendExpedition(
+    GameState s,
+    String locId,
+    List<int> squadIds,
+    Set<int> frontIds, {
+    Map<int, Pos>? placement,
+  }) {
+    final away = squadIds.toSet();
+    final before = <int, List<int>>{
+      for (final f in s.facilities) f.id: List.of(f.assigned),
+    };
+    for (final f in s.facilities) {
+      f.assigned.removeWhere(away.contains);
+    }
+    try {
+      return _sendExpedition(
+        s,
+        locId,
+        squadIds,
+        frontIds,
+        placement: placement,
+      );
+    } finally {
+      for (final f in s.facilities) {
+        final orig = before[f.id];
+        if (orig == null) continue;
+        // Giữ thứ tự cũ: người không đi (nếu còn trong danh sách hiện tại) + người đi mà còn sống. Người đã đào ngũ /
+        // tử trận / bị sa thải trong lúc đi không được thêm lại.
+        final keep = [
+          for (final id in orig)
+            if (f.assigned.contains(id) ||
+                (away.contains(id) && (s.soldier(id)?.alive ?? false)))
+              id,
+        ];
+        // Người khác được gán trong lúc đi (không có luồng nào làm vậy) vẫn được giữ; tránh trùng và vượt chỗ.
+        final extra = [
+          for (final id in f.assigned)
+            if (!keep.contains(id)) id,
+        ];
+        final merged = [...keep, ...extra];
+        final cap = slotsOf(s, f);
+        f.assigned
+          ..clear()
+          ..addAll(merged.take(cap));
+      }
+    }
+  }
+
+  static ExpeditionResult _sendExpedition(
     GameState s,
     String locId,
     List<int> squadIds,
@@ -1885,9 +2523,21 @@ class GameRules {
     ExpeditionResult fail(String m) => ExpeditionResult(ActionResult.fail(m));
     final blocked = _blocked(s);
     if (blocked != null) return fail(blocked.message);
-    final loc = locationById(locId);
+    final loc = locationFor(s, locId);
     if (loc == null || !s.discovered.contains(locId) && !loc.startsDiscovered) {
       return fail('Địa điểm chưa được khám phá.');
+    }
+    // Điểm giao chiến của nhiệm vụ săn: chỉ đánh được khi nhân vật thật sự đã tới điểm đó (không tự mở trận).
+    final enc = _encounterMission(s, locId)?.encounter;
+    if (enc != null &&
+        s.hero.position.distanceTo(WPoint(enc.x, enc.y)) >
+            encounterArriveRadius) {
+      return fail('Chưa tới điểm giao chiến.');
+    }
+    if (loc.kind == LocKind.resource) {
+      return fail(
+        'Nơi này không còn sản lượng thu hoạch: tài nguyên đến từ chiến đấu.',
+      );
     }
     if (!regionUnlocked(s, regionById(loc.regionId))) {
       return fail('Vùng này chưa mở.');
@@ -1923,10 +2573,29 @@ class GameRules {
         return fail('Nhà vua đã cách chức bạn trong lúc hành quân.');
       }
     }
+    // Điểm giao chiến của nhiệm vụ săn có thể hết hạn ngay trong lúc hành quân: không còn điểm thì không có trận.
+    if (locationFor(s, locId) == null) {
+      return fail(
+        'Nhiệm vụ đã hết hạn trong lúc hành quân; điểm giao chiến không còn.',
+      );
+    }
     // Binh sĩ có thể đào ngũ trên đường đi.
     squad.removeWhere((x) => !x.alive);
     if (squad.isEmpty) return fail('Cả đội đã tan rã trên đường.');
     res.lines.add('Hành quân ${loc.days} ngày tới ${loc.name}.');
+
+    /// Chiến lợi phẩm của trận THẮNG, rút từ chính kẻ địch đã đánh (cấp, trang bị). Mỗi lần gọi
+    /// `sendExpedition` giải quyết đúng một trận nên chỉ trao đúng một lần; trận thua/hòa không gọi.
+    void collectLoot(List<Soldier> enemies) {
+      final loot = LootEconomy.roll(rng(s), enemies, s.res);
+      grant(s, loot.res);
+      for (final e in loot.res.entries) {
+        res.gained[e.key] = (res.gained[e.key] ?? 0) + e.value;
+      }
+      for (final design in loot.items) {
+        res.itemsGained.add(EquipmentService.mint(s, design));
+      }
+    }
 
     ExpeditionResult finishBattle(
       List<Soldier> enemies, {
@@ -1947,14 +2616,16 @@ class GameRules {
 
     switch (loc.kind) {
       case LocKind.camp:
-        finishBattle(enemiesFor(s, loc.enemies), ambush: false);
+        final foes = enemiesFor(s, loc.enemies);
+        finishBattle(foes, ambush: false);
         if (res.battle!.winner == Winner.player) {
-          s.cleared.add(loc.id);
-          grant(s, loc.loot);
-          res.gained = Map.of(loc.loot);
+          // Điểm giao chiến của nhiệm vụ săn dùng một lần: nhiệm vụ hoàn thành là điểm biến mất, không cần ghi `cleared`.
+          if (locationById(loc.id) != null) s.cleared.add(loc.id);
+          collectLoot(foes);
           if (loc.lootItem != null) {
-            s.inventory[loc.lootItem!] = (s.inventory[loc.lootItem!] ?? 0) + 1;
-            res.itemGained = loc.lootItem;
+            // Phần thưởng đặc trưng của địa điểm (một lần vì địa điểm chỉ quét sạch một lần); là bản sao
+            // riêng, có thể mang biến thể buff/debuff.
+            res.itemsGained.add(EquipmentService.mint(s, loc.lootItem!));
           }
           _progressClear(s, loc.id, squad, res);
           res.lines.add('Chiến thắng! ${loc.name} đã bị quét sạch.');
@@ -1966,24 +2637,7 @@ class GameRules {
           );
         }
       case LocKind.resource:
-        var ok = true;
-        if (rng(s).nextDouble() < ambushChance) {
-          final amb = enemiesFor(s, [
-            EnemySpec(Role.spearman, 1 + s.tier ~/ 2, 2),
-            EnemySpec(Role.archer, 1 + s.tier ~/ 2, 1),
-          ]);
-          finishBattle(amb, ambush: true);
-          ok = res.battle!.winner == Winner.player;
-          res.lines.add(
-            ok ? 'Phục kích bị đẩy lui.' : 'Bị phục kích và phải bỏ lại hàng.',
-          );
-        }
-        if (ok) {
-          final amount = (loc.yield * (0.6 + 0.1 * squad.length)).round();
-          grant(s, {loc.res!: amount});
-          res.gained = {loc.res!: amount};
-          res.lines.add('Thu được $amount ${resNames[loc.res!]}.');
-        }
+        break; // đã bị chặn từ đầu hàm: không còn sản lượng thu hoạch
       case LocKind.city:
         s.visiting = loc.id;
         final town = worldMap.townById(loc.id);
@@ -2010,17 +2664,14 @@ class GameRules {
           final r = rng(s);
           final roll = r.nextDouble();
           if (roll < 0.5) {
-            final coins = 40 + r.nextInt(41) + 20 * s.tier;
+            final coins = 10 + r.nextInt(11) + 5 * s.tier;
             grant(s, {Res.coins: coins});
-            res.gained = {Res.coins: coins};
+            res.gained[Res.coins] = (res.gained[Res.coins] ?? 0) + coins;
             res.lines.add('Tìm thấy kho báu: $coins vàng.');
             if (r.nextBool()) {
-              final pool = itemDefs.values
-                  .where((i) => i.tier <= 1 + s.tier)
-                  .toList();
-              final it = pool[r.nextInt(pool.length)];
-              s.inventory[it.id] = (s.inventory[it.id] ?? 0) + 1;
-              res.itemGained = it.id;
+              res.itemsGained.add(
+                EquipmentService.mint(s, rollGearDesign(r, 1 + s.tier)),
+              );
             }
           } else if (roll < 0.75) {
             final victim = squad[r.nextInt(squad.length)];
@@ -2044,8 +2695,12 @@ class GameRules {
                 ..clear()
                 ..addAll(squad.map((x) => x.id));
               if (missionReady(s, m)) {
-                final r = _settle(s, m);
-                if (r.ok) res.missionNote = r.message;
+                final payout = QuestPayout(t.title);
+                final r = _settle(s, m, payout: payout);
+                if (r.ok) {
+                  res.missionNote = r.message;
+                  res.payouts.add(payout);
+                }
               } else {
                 m.targetId = objectiveFor(s, t, m.giverTown);
               }
@@ -2065,15 +2720,30 @@ class GameRules {
   ) {
     for (final m in byStatus(s, MissionStatus.active)) {
       final t = templateById(m.templateId);
+      if (t.kind == MissionKind.hunt && m.targetId == locId) {
+        if (remainingDays(s, m) <= 0) continue;
+        m.progress = 1;
+        m.squad
+          ..clear()
+          ..addAll(squad.map((x) => x.id));
+        // Thắng trận = hoàn thành: trao thưởng ngay, đúng một lần (chốt `rewarded`).
+        final payout = QuestPayout(t.title);
+        final r = _settle(s, m, payout: payout);
+        res.missionNote = r.ok ? r.message : null;
+        if (r.ok) res.payouts.add(payout);
+        continue;
+      }
       if (t.kind == MissionKind.clear && t.locId == locId) {
-        if (s.day > m.deadline) continue;
+        if (remainingDays(s, m) <= 0) continue;
         if (squad.length >= t.minSoldiers) {
           m.progress = 1;
           m.squad
             ..clear()
             ..addAll(squad.map((x) => x.id));
           // Thắng trận = hoàn thành mục tiêu: trao thưởng ngay, đúng một lần.
-          final r = _settle(s, m);
+          final payout = QuestPayout(t.title);
+          final r = _settle(s, m, payout: payout);
+          if (r.ok) res.payouts.add(payout);
           res.missionNote = r.ok
               ? r.message
               : 'Mục tiêu nhiệm vụ "${t.title}" đã hoàn thành.';

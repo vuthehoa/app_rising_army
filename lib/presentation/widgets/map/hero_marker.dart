@@ -7,6 +7,7 @@ import '../../../domain/identity.dart';
 import '../../../domain/models.dart';
 import '../../../domain/terrain_type.dart';
 import '../art/soldiers/soldier_painter.dart';
+import '../flag/flag_view.dart';
 
 /// Thanh thể lực gắn trên đầu nhân vật. Chỉ hiển thị giá trị của [HeroState] (không có bản sao riêng).
 class StaminaBar extends StatelessWidget {
@@ -121,7 +122,53 @@ class HeroMarker extends StatelessWidget {
               ),
             ),
           ),
+          // Cờ quân đoàn cắm cạnh nhân vật (chỉ đọc cờ từ danh tính; không phải đơn vị mới).
+          Positioned(
+            key: const ValueKey('hero-legion-flag'),
+            bottom: 0,
+            left: 48 + size * 0.34,
+            child: Transform.translate(
+              offset: Offset(0, bob),
+              child: _BannerPole(identity: identity, height: size * 0.92),
+            ),
+          ),
           Positioned(top: 0, child: StaminaBar(stamina: hero.stamina)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Cột cờ nhỏ mang quân kỳ của người chơi, đặt cạnh nhân vật trên bản đồ.
+class _BannerPole extends StatelessWidget {
+  const _BannerPole({required this.identity, required this.height});
+
+  final PlayerIdentity identity;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final flagW = (height * 0.42).clamp(16.0, 30.0).toDouble();
+    return SizedBox(
+      width: flagW + 3,
+      height: height,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(width: 2, color: const Color(0xFF3A2A18)),
+          ),
+          Positioned(
+            left: 2,
+            top: 1,
+            child: FlagView(
+              composition: composeFlag(identity.flag),
+              width: flagW,
+              showBorder: false,
+            ),
+          ),
         ],
       ),
     );

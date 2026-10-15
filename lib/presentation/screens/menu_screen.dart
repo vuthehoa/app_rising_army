@@ -15,7 +15,9 @@ class MainMenuScreen extends StatelessWidget {
     final c = ControllerScope.of(context);
     final d = Dims(context);
     final screen = MediaQuery.sizeOf(context);
-    final compact = screen.width < 720;
+    // Bố cục dọc (artwork trên, menu dưới) chỉ cho màn hẹp VÀ cao; điện thoại landscape thấp dùng bố cục hai cột để nút chính
+    // nằm trong tầm nhìn thay vì bị đẩy xuống dưới nếp gập.
+    final compact = screen.width < 720 && screen.height > screen.width * 0.7;
 
     final notice = switch (c.loadStatus) {
       LoadStatus.recoveredFromBackup =>
@@ -313,12 +315,16 @@ class MainMenuScreen extends StatelessWidget {
     required Future<void> Function() onNewGame,
     required bool compact,
   }) {
+    // Màn rất thấp (667×375): bỏ phần trang trí để Tiếp tục / Bắt đầu nằm trong tầm nhìn, không phải cuộn.
+    final short = MediaQuery.sizeOf(context).height < 380;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.shield, color: Pal.gold, size: 34),
-        const SizedBox(height: 10),
+        if (!short) ...[
+          const Icon(Icons.shield, color: Pal.gold, size: 34),
+          const SizedBox(height: 10),
+        ],
         const FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
@@ -341,7 +347,7 @@ class MainMenuScreen extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: short ? 6 : 10),
         const Text(
           'DỰNG TRẠI · LUYỆN QUÂN · CHINH PHẠT',
           textAlign: TextAlign.center,
@@ -352,15 +358,17 @@ class MainMenuScreen extends StatelessWidget {
             letterSpacing: 1.2,
           ),
         ),
-        const SizedBox(height: 7),
-        const Text(
-          'Từng người lính làm nên một đạo quân.\nTừng chiến thắng mở ra một con đường.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Pal.text, fontSize: 12, height: 1.6),
-        ),
-        SizedBox(height: d.gap * 2),
+        if (!short) ...[
+          const SizedBox(height: 7),
+          const Text(
+            'Từng người lính làm nên một đạo quân.\nTừng chiến thắng mở ra một con đường.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Pal.text, fontSize: 12, height: 1.6),
+          ),
+        ],
+        SizedBox(height: d.gap * (short ? 1 : 2)),
         _buildDivider(),
-        SizedBox(height: d.gap * 1.5),
+        SizedBox(height: d.gap * (short ? 1 : 1.5)),
 
         if (notice != null) ...[
           _buildNotice(notice, bad),

@@ -1,3 +1,4 @@
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/camp_layout.dart';
 
 import 'dart:convert';
@@ -48,7 +49,11 @@ void main() {
       expect(c.placing, isNull);
       expect(c.state!.buildings[Building.barracks], 1);
       expect(GameRules.facilityCount(c.state!, FacilityType.barracks), 1);
-      expect(c.state!.res[Res.coins], coins - upgradeCosts[1]![Res.coins]!);
+      expect(
+        c.state!.res[Res.coins],
+        coins -
+            ConstructionEconomy.buildCost(FacilityType.barracks)[Res.coins]!,
+      );
       final f = c.state!.facilities.single;
       expect(f.x, GameRules.facilitySlots[slot].$1);
       expect(f.y, GameRules.facilitySlots[slot].$2);
@@ -101,7 +106,10 @@ void main() {
       expect(GameRules.chestCount(c.state!), 1);
       expect(
         c.state!.res[Res.coins],
-        coins - facilityDefs[FacilityType.storageChest]!.cost[Res.coins]!,
+        coins -
+            ConstructionEconomy.buildCost(
+              FacilityType.storageChest,
+            )[Res.coins]!,
       );
     });
   });
@@ -263,7 +271,11 @@ void main() {
           final f = find.byKey(ValueKey('camp-build-$id'));
           await tester.ensureVisible(f);
           await tester.pumpAndSettle();
-          await tester.tap(f);
+          await tester.tap(
+            f,
+          ); // mở thẻ thông tin; "Xây công trình" mới bắt đầu luồng đặt
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Xây công trình'));
           await tester.pumpAndSettle();
           expect(c.placing, def(id).facility, reason: id);
           expect(wentTo, Sections.camp, reason: id);

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/catalog.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/world_data.dart';
 import 'package:app_rising_army/domain/world_map.dart';
@@ -61,7 +63,7 @@ Future<void> walkFor(WidgetTester t, int ms) async {
 
 void main() {
   testWidgets(
-    'panel nhiệm vụ trượt từ phải ~1/3 màn hình, chỉ có tên và thời gian còn lại',
+    'panel nhiệm vụ trượt từ phải ~1/3 màn hình, có tên, thời gian, tiến độ và thưởng của nhiệm vụ đã nhận',
     (t) async {
       const size = Size(900, 400);
       final c = await boot(t, size);
@@ -77,21 +79,29 @@ void main() {
       expect(panel, findsOneWidget);
       expect(t.getSize(panel).width, closeTo(size.width / 3, 1));
       expect(t.getRect(panel).right, closeTo(size.width, 1));
-      // Chỉ nhiệm vụ đã nhận, chỉ tên + thời gian.
+      // Chỉ nhiệm vụ đã nhận: tên, thời gian, tiến độ thật, thưởng dự kiến và hai nút (Chi tiết / Bỏ).
       expect(find.text('Tiếp tế lương thực'), findsOneWidget);
-      expect(find.textContaining('Còn '), findsOneWidget);
+      expect(find.textContaining('Còn '), findsWidgets);
       expect(find.text('Dẹp trại cướp đường'), findsNothing);
       expect(find.text('Thám hiểm Thung Lũng'), findsNothing);
       expect(
         find.textContaining('lương thực cho kho'),
         findsNothing,
-      ); // không có mô tả
-      expect(find.textContaining('vàng'), findsNothing); // không có phần thưởng
+      ); // không có mô tả dài (xem trong popup chi tiết)
       final item = find.byKey(const ValueKey('quest-item-2'));
       expect(
-        find.descendant(of: item, matching: find.byType(Text)),
-        findsNWidgets(2),
+        find.descendant(
+          of: item,
+          matching: find.byKey(const ValueKey('quest-progress-2')),
+        ),
+        findsOneWidget,
       );
+      expect(
+        find.descendant(of: item, matching: find.textContaining('Thưởng:')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('quest-detail-2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('quest-abandon-2')), findsOneWidget);
       // Bản đồ phía sau vẫn còn.
       expect(find.byKey(const ValueKey('map-surface')), findsOneWidget);
 
@@ -273,7 +283,7 @@ void main() {
   });
 
   testWidgets(
-    'nhận nhiệm vụ qua thẻ ở giao diện thành trấn: xuất hiện trong danh sách đang làm',
+    'nhận nhiệm vụ ở giao diện thành trấn: chạm thẻ mở popup, xác nhận mới nhận và xuất hiện trong danh sách đang làm',
     (t) async {
       final c = await boot(
         t,
@@ -288,6 +298,11 @@ void main() {
       expect(find.text('Gỗ cho tường thành'), findsOneWidget);
       await t.ensureVisible(find.text('Gỗ cho tường thành'));
       await t.tap(find.text('Gỗ cho tường thành'));
+      await t.pumpAndSettle();
+      // Chạm thẻ chỉ mở popup chi tiết; chưa nhận.
+      expect(find.byKey(const ValueKey('mission-detail')), findsOneWidget);
+      expect(m.status, MissionStatus.offered);
+      await t.tap(find.byKey(const ValueKey('mission-accept')));
       await t.pumpAndSettle();
       expect(m.status, MissionStatus.active);
       expect(m.targetId, 'g_town');
@@ -327,7 +342,18 @@ void main() {
       accept(c, 1);
       expect(c.completeMission(1).ok, isTrue);
       await t.pump();
-      expect(progress(), closeTo(0.46, 1e-9)); // 40 + 6
+      final gain = QuestEconomy.of(templateById('deliver_food_a')).sat;
+      expect(gain, greaterThan(0));
+      expect(progress(), closeTo((40 + gain) / 100, 1e-9));
+      // Số điểm uy tín hiển thị trên thanh khớp state thật.
+      expect(
+        t
+            .widget<Text>(
+              find.byKey(const ValueKey('hud-king-satisfaction-value')),
+            )
+            .data,
+        '${40 + gain}',
+      );
     },
   );
 }

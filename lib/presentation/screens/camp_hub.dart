@@ -2,6 +2,7 @@ import 'package:app_rising_army/presentation/widgets/buildings/camp_scene/camp_g
 import 'package:flutter/material.dart';
 
 import '../../application/game_controller.dart';
+import '../../domain/models.dart';
 import '../widgets/camp/camp_build_menu.dart';
 import '../widgets/camp/camp_drag_handoff.dart';
 import '../widgets/camp/camp_overlays.dart';
@@ -141,7 +142,9 @@ class _CampHubState extends State<CampHub> {
                       moving: c.movingId != null,
                     ),
                   ),
-                Positioned.fill(child: CampHud(state: s)),
+                Positioned.fill(
+                  child: CampHud(state: s, soldier: s.soldiers[0]),
+                ),
                 // HUD nổi: Top HUD trên hàng rào phía trên, Resource HUD bám hàng rào bên trái.
                 GameHudOverlay(
                   insets: HudInsets.camp(
@@ -154,12 +157,27 @@ class _CampHubState extends State<CampHub> {
                   placing: placing != null,
                   onBuild: () => _openBuild(context, c),
                   onCancel: c.cancelPlacement,
-                  onNextDay: () {},
+                  onNextDay: () => _nextDay(context, c),
                 ),
               ],
             );
           },
         ),
+      ),
+    );
+  }
+
+  /// Qua ngày (chỉ ở Camp). Controller chặn bấm lặp; kết quả hiện bằng thông báo ngắn.
+  Future<void> _nextDay(BuildContext context, GameController c) async {
+    final r = await c.advanceDay();
+    if (r == null || !mounted || !context.mounted) return;
+    final u = r.upkeep;
+    toast(
+      context,
+      ActionResult.ok(
+        r.paid
+            ? 'Sang ngày ${c.state!.day}. Trả quân: ${u[Res.coins]} vàng, ${u[Res.food]} lương thực.'
+            : 'Sang ngày ${c.state!.day}. Không đủ vàng/lương thực trả quân: tinh thần giảm!',
       ),
     );
   }

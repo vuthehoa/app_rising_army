@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../application/game_controller.dart';
 import '../../application/new_game_flow.dart';
 import '../../data/save_repository.dart';
+import '../../domain/equipment/equipment_catalog.dart';
+import '../../domain/equipment/equipment_service.dart';
+import '../../domain/models.dart';
 import '../../domain/rules.dart';
 import '../screens/battle_screen.dart';
 import '../screens/buildings_screen.dart';
@@ -13,6 +16,8 @@ import '../screens/recruit_screen.dart';
 import '../screens/roster_screen.dart';
 import '../screens/city_screen.dart';
 import '../screens/deploy_screen.dart';
+import '../screens/equipment_catalog_browser.dart';
+import '../screens/equipment_screen.dart';
 import '../screens/intro_screen.dart';
 import '../screens/legion_flag_screen.dart';
 import '../screens/menu_screen.dart';
@@ -134,6 +139,17 @@ final devScreens = <DevScreenEntry>[
   DevScreenEntry('Gameplay', 'Tavern: quán rượu', TavernScreen, (_) {
     return const TavernScreen(vendorId: 'g_tavern');
   }),
+  DevScreenEntry(
+    'Gameplay',
+    'Equipment: tất cả 170 thiết kế (Hòm đồ kiểm thử)',
+    EquipmentCatalogBrowser,
+    (sb) => _EquipmentDevHub(sandbox: sb),
+  ),
+  DevScreenEntry('Gameplay', 'Equipment: quản lý trang bị', EquipmentManager, (
+    sb,
+  ) {
+    return _EquipmentSandbox(controller: sb.controller);
+  }),
   DevScreenEntry('Gameplay', 'Vendor: thợ rèn', VendorScreen, (_) {
     return const VendorScreen(vendorId: 'g_smith');
   }),
@@ -164,6 +180,70 @@ class _ShellTab extends StatelessWidget {
   Widget build(BuildContext context) => ShellNav(
     go: (_) {},
     child: Scaffold(body: SafeArea(child: child)),
+  );
+}
+
+/// Màn quản lý trang bị trên sandbox đã nạp sẵn kho đồ đủ mọi cấp (bản tiêu chuẩn + bản có biến thể).
+class _EquipmentSandbox extends StatefulWidget {
+  const _EquipmentSandbox({required this.controller});
+
+  final GameController controller;
+
+  @override
+  State<_EquipmentSandbox> createState() => _EquipmentSandboxState();
+}
+
+class _EquipmentSandboxState extends State<_EquipmentSandbox> {
+  late final int _soldierId;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.controller.state!;
+    final so = s.roster.firstWhere((x) => x.role == Role.spearman);
+    so
+      ..level = 10
+      ..stats[Stat.str] = 18;
+    if (s.inventory.isEmpty ||
+        !EquipmentCatalog.all.any((d) => s.inventory.containsKey(d.id))) {
+      for (var g = 1; g <= 5; g++) {
+        for (final slot in [Slot.armor, Slot.weapon, Slot.shield]) {
+          final designs = EquipmentCatalog.of(slot, g);
+          for (var i = 0; i < designs.length && i < 5; i++) {
+            EquipmentService.mint(s, designs[i].id, rolled: i.isOdd);
+          }
+        }
+      }
+    }
+    _soldierId = so.id;
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black54,
+    body: SafeArea(
+      child: Center(
+        child: EquipmentManager(
+          controller: widget.controller,
+          soldierId: _soldierId,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Mở trình duyệt catalog; nút Sandbox chuyển sang màn Equipment sandbox ban đầu.
+class _EquipmentDevHub extends StatelessWidget {
+  const _EquipmentDevHub({required this.sandbox});
+  final DevSandbox sandbox;
+
+  @override
+  Widget build(BuildContext context) => EquipmentCatalogBrowser(
+    onOpenSandbox: () => Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _EquipmentSandbox(controller: sandbox.controller),
+      ),
+    ),
   );
 }
 

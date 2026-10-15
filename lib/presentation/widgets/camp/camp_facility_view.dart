@@ -96,6 +96,13 @@ class _CampFacilityViewState extends State<CampFacilityView> {
       ),
       builder: (context, candidates, _) {
         final hot = candidates.isNotEmpty;
+        // Chỉ đọc dữ liệu thật: số binh sĩ đang gán so với sức chứa của công trình ([Facility.slots]).
+        final used = facility.assigned.length;
+        final slots = GameRules.slotsOf(widget.state, facility);
+        final full = used >= slots;
+        // Thả thêm khi đã đầy (và binh sĩ này chưa ở đây) sẽ bị từ chối: viền đỏ báo trước.
+        final blocked =
+            hot && full && !facility.assigned.contains(candidates.first);
         return Semantics(
           label: def.name,
           button: true,
@@ -113,9 +120,22 @@ class _CampFacilityViewState extends State<CampFacilityView> {
                   Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        border: Border.all(color: Pal.gold, width: 3),
+                        border: Border.all(
+                          color: blocked ? const Color(0xFFC4473B) : Pal.gold,
+                          width: 3,
+                        ),
                         borderRadius: BorderRadius.circular(16),
                       ),
+                    ),
+                  ),
+                if (takes)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: _OccupancyPill(
+                      key: ValueKey('facility-occupancy-${facility.id}'),
+                      used: used,
+                      slots: slots,
                     ),
                   ),
               ],
@@ -134,4 +154,55 @@ class CampCampfireDecor extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const IgnorePointer(child: CampfireArt());
+}
+
+/// Chấm "đã gán/sức chứa" ở góc công trình nhận binh sĩ: mỗi chỗ một chấm, đặc nếu đã có người. Không có chữ
+/// (Camp chỉ có art, không nhãn); chỉ hiển thị, không nhận chạm.
+class _OccupancyPill extends StatelessWidget {
+  const _OccupancyPill({super.key, required this.used, required this.slots});
+
+  final int used;
+  final int slots;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Semantics(
+        label: 'Đã gán $used trên $slots chỗ',
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xE6F3DDB0),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Pal.ink, width: 1.5),
+          ),
+          child: slots > 6
+              ? Text(
+                  '$used/$slots',
+                  style: const TextStyle(
+                    color: Pal.ink,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                  ),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < slots; i++)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        margin: EdgeInsets.only(left: i == 0 ? 0 : 2),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: i < used ? Pal.ink : Colors.transparent,
+                          border: Border.all(color: Pal.ink, width: 1),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }

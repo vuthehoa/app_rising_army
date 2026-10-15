@@ -142,7 +142,7 @@ void main() {
   });
 
   group('routing', () {
-    testWidgets('New Game → avatar → cờ → intro → Xây dựng', (tester) async {
+    testWidgets('New Game → avatar → cờ → intro → Trại', (tester) async {
       final (c, store) = await controllerWithSave();
       await pumpApp(tester, c);
       await tapNewGame(tester);
@@ -155,7 +155,7 @@ void main() {
       expect(find.byType(LegionFlagScreen), findsOneWidget);
       expect(store.primaryWrites, 0);
 
-      await tester.tap(find.text('Xác nhận quân kỳ'));
+      await tester.tap(find.text('XÁC NHẬN'));
       await tester.pumpAndSettle();
       expect(find.byType(IntroScreen), findsOneWidget);
       expect(store.primaryWrites, 0);
@@ -171,9 +171,9 @@ void main() {
       expect(find.byType(GameShell), findsOneWidget);
       expect(find.byType(IntroScreen), findsNothing);
       expect(find.byType(NewGameScreen), findsNothing);
-      // tab Xây dựng đang hiển thị (IndexedStack index = Sections.build)
+      // Ván mới mở Trại: tab Xây dựng chỉ có ở Develop Mode (GameShell), nên người chơi thường vào thẳng Trại.
       final stack = tester.widget<IndexedStack>(find.byType(IndexedStack));
-      expect(stack.index, Sections.build);
+      expect(stack.index, Sections.camp);
     });
 
     testWidgets('avatar không hợp lệ (tên rỗng) bị chặn', (tester) async {
@@ -201,7 +201,7 @@ void main() {
       await tapNewGame(tester);
       finishAvatar(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
       expect(
         find.byType(NewGameScreen),
@@ -209,12 +209,14 @@ void main() {
       ); // bước trước còn nguyên
       finishAvatar(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Xác nhận quân kỳ'));
+      await tester.tap(find.text('XÁC NHẬN'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(
+        find.byType(BackButton),
+      ); // màn giới thiệu vẫn dùng nút Back chuẩn
       await tester.pumpAndSettle();
       expect(find.byType(LegionFlagScreen), findsOneWidget);
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.byIcon(Icons.arrow_back_rounded));
       await tester.pumpAndSettle();
       tester.widget<NewGameScreen>(find.byType(NewGameScreen)).onBack!();
       await tester.pumpAndSettle();
@@ -235,7 +237,7 @@ void main() {
       await tapNewGame(tester);
       finishAvatar(tester);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Xác nhận quân kỳ'));
+      await tester.tap(find.text('XÁC NHẬN'));
       await tester.pumpAndSettle();
 
       store.failWrites = true;

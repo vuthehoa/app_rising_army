@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../domain/models.dart';
+import '../domain/rules.dart';
 import '../domain/movement.dart';
 import '../domain/terrain_type.dart';
 import '../domain/world_data.dart';
@@ -46,8 +47,8 @@ class HeroTravel extends ChangeNotifier {
   /// Đi bộ tới TÂM địa điểm [id]; khi tới nơi, [takeArrivedPlace] trả về [id].
   /// Thay thế hành trình cũ (kể cả tới thị trấn khác). Trả về lý do nếu bị từ chối.
   String? walkToPlace(String id) {
-    final pos = worldMap.positionOf(id);
     final s = _state();
+    final pos = s == null ? null : GameRules.targetPosition(s, id);
     if (pos == null || s == null) return 'Không có địa điểm này.';
     if (s.hero.position.distanceTo(pos) <= MovementRules.arriveEpsilon) {
       _destination = null;

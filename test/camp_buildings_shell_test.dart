@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
+import 'package:app_rising_army/domain/economy.dart';
 import 'package:app_rising_army/domain/catalog.dart';
 import 'package:app_rising_army/domain/dev_mode.dart';
 import 'package:app_rising_army/domain/models.dart';
@@ -48,7 +49,8 @@ void main() {
         expect(s.facilities, hasLength(1));
         expect(
           s.res[Res.coins],
-          coins - facilityDefs[FacilityType.meleeYard]!.cost[Res.coins]!,
+          coins -
+              ConstructionEconomy.buildCost(FacilityType.meleeYard)[Res.coins]!,
         );
         expect(
           GameRules.buildFacility(s, FacilityType.archeryRange, slot).ok,

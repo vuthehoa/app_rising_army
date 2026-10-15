@@ -1,8 +1,11 @@
+import 'dart:math';
+
 import 'package:app_rising_army/application/game_controller.dart';
 import 'package:app_rising_army/data/save_repository.dart';
 import 'package:app_rising_army/domain/building_effects.dart';
 import 'package:app_rising_army/domain/models.dart';
 import 'package:app_rising_army/domain/rules.dart';
+import 'package:app_rising_army/domain/stat_formulas.dart';
 import 'package:app_rising_army/domain/stats.dart';
 import 'package:app_rising_army/presentation/widgets/camp/soldier_info_dialog.dart';
 import 'package:app_rising_army/presentation/widgets/stat_icon.dart';
@@ -36,11 +39,9 @@ void main() {
         'strength++,stamina+,energy--,morale-',
       );
       expect(sig(FacilityType.barracks), 'energy++,morale+');
-      for (final t in [
-        FacilityType.storageChest,
-        FacilityType.enduranceYard,
-        FacilityType.gravestone,
-      ]) {
+      // Bãi đá tăng TINH THẦN mỗi ngày (không huấn luyện Thể hình).
+      expect(sig(FacilityType.enduranceYard), 'morale++');
+      for (final t in [FacilityType.storageChest, FacilityType.gravestone]) {
         expect(effectsOf(t), isEmpty, reason: t.name);
       }
       expect(campfireEffects.single.stat, EffectStat.morale);
@@ -51,13 +52,18 @@ void main() {
   group('Lều cứu thương', () {
     test('hồi đúng 20 HP/ngày, không vượt tối đa, +năng lượng', () {
       final s = camp();
+      final cap = energyCap(s.roster.first);
       final so = s.roster.first
         ..hp = 1
-        ..energy = 50;
+        ..energy = cap ~/ 2;
       assign(s, so, FacilityType.infirmary);
       GameRules.tickDay(s);
       expect(so.hp, 21);
-      expect(so.energy, 55);
+      expect(
+        so.energy,
+        cap ~/ 2 + scaleVital(pointsPerDay[EffectLevel.up]!, cap),
+        reason: 'điểm/ngày quy theo Thể lực tối đa của từng lính',
+      );
       so.hp = so.maxHp - 5;
       GameRules.tickDay(s);
       expect(so.hp, so.maxHp);
@@ -80,20 +86,22 @@ void main() {
   });
 
   group('Bãi bắn cung', () {
-    test('đủ 4 ngày mới +1 sức mạnh, buff 25% chỉ khi tập, năng lượng/tinh thần giảm', () {
+    test('đủ 4 ngày mới +1 tốc độ (++), sức mạnh (+) chậm hơn, buff 25% chỉ khi tập, năng lượng/tinh thần giảm', () {
       final s = camp();
       final so = s.roster.first
         ..energy = 100
         ..morale = 70;
-      final str0 = so.stats[Stat.str]!;
+      final str0 = so.stats[Stat.str]!, dex0 = so.stats[Stat.dex]!;
       assign(s, so, FacilityType.archeryRange);
       for (var i = 0; i < 3; i++) {
         GameRules.tickDay(s);
       }
-      expect(so.stats[Stat.str], str0);
-      expect(so.train[Stat.str], 75);
+      expect(so.stats[Stat.dex], dex0);
+      expect(so.train[Stat.dex], 75, reason: '++ : 25%/ngày');
+      expect(so.train[Stat.str], 45, reason: '+ : 15%/ngày, thấp hơn ++');
       GameRules.tickDay(s);
-      expect(so.stats[Stat.str], str0 + 1);
+      expect(so.stats[Stat.dex], dex0 + 1);
+      expect(so.stats[Stat.str], str0);
       expect(so.energy, lessThan(100));
       final base = deriveStats(so).stats[Stat.str]!;
       final boosted = deriveStats(
@@ -115,31 +123,44 @@ void main() {
       GameRules.tickDay(s);
       final back = GameState.fromJson(s.toJson());
       final b = back.soldier(so.id)!;
-      expect(b.train[Stat.str], 50);
+      expect(b.train[Stat.dex], 50);
+      expect(b.train[Stat.str], 30);
       expect(b.energy, so.energy);
       GameRules.tickDay(back);
       GameRules.tickDay(back);
-      expect(back.soldier(so.id)!.stats[Stat.str], so.stats[Stat.str]! + 1);
+      expect(back.soldier(so.id)!.stats[Stat.dex], so.stats[Stat.dex]! + 1);
     });
   });
 
-  test(
-    'Bãi cận chiến trừ năng lượng/tinh thần; Doanh trại cộng cho lính nhàn rỗi',
-    () {
-      final s = camp();
-      final a = s.roster[0]
-        ..energy = 80
-        ..morale = 50;
-      final b = s.roster[1]
-        ..energy = 80
-        ..morale = 50;
-      assign(s, a, FacilityType.meleeYard);
-      GameRules.tickDay(s);
-      expect(a.energy, 74);
-      expect(b.energy, 90);
-      expect(b.morale, greaterThan(a.morale));
-    },
-  );
+  test('Bãi cận chiến trừ Thể lực/Tinh thần theo thang quy đổi; lính được bố trí vào Doanh trại được cộng', () {
+    final s = camp();
+    final a = s.roster[0];
+    final b = s.roster[1];
+    for (final x in [a, b]) {
+      x
+        ..energy = energyCap(x) * 4 ~/ 5
+        ..morale = moraleCap(x) ~/ 2;
+    }
+    final aEnergy = a.energy, aMorale = a.morale;
+    final bEnergy = b.energy, bMorale = b.morale;
+    GameRules.syncBarracksInstance(s);
+    assign(s, a, FacilityType.meleeYard);
+    assign(s, b, FacilityType.barracks);
+    GameRules.tickDay(s);
+    expect(
+      a.energy,
+      aEnergy + scaleVital(pointsPerDay[EffectLevel.strongDown]!, energyCap(a)),
+    );
+    expect(
+      b.energy,
+      min(
+        energyCap(b),
+        bEnergy + scaleVital(pointsPerDay[EffectLevel.strongUp]!, energyCap(b)),
+      ),
+    );
+    expect(b.morale, greaterThan(bMorale));
+    expect(a.morale, lessThan(aMorale));
+  });
 
   test('save cũ không có energy vẫn đọc được', () {
     final s = camp();
@@ -162,7 +183,9 @@ void main() {
             home: Scaffold(
               body: Column(
                 children: [
-                  BuildingEffectIcons(displayEffectsOf(FacilityType.archeryRange)),
+                  BuildingEffectIcons(
+                    displayEffectsOf(FacilityType.archeryRange),
+                  ),
                   const BuildingEffectIcons([], key: ValueKey('empty')),
                 ],
               ),

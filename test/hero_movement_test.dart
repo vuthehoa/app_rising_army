@@ -150,11 +150,19 @@ void main() {
       expect(again.position, r.position);
     });
 
-    test('không đi xuyên sông hoặc vách đá; dừng sát vật cản', () {
+    test('sông và vách đá đi qua được nhưng tốn thể lực gấp 2× địa hình đi bộ khó nhất', () {
       // Từ bờ tây Sông Bạc đi thẳng sang đông tại chỗ không có cầu.
-      final from = const WPoint(1000, 700);
+      const from = WPoint(1000, 700);
+      const to = WPoint(1700, 700);
       expect(worldMap.isPassable(from), isTrue);
-      final to = const WPoint(1700, 700);
+      final est = MovementRules.estimate(worldMap, from, to);
+      expect(est.reachable, isTrue, reason: 'không còn bị chặn');
+      expect(est.blockedBy, isNull);
+      // Đắt hơn đi cùng quãng trên đất bằng (có đoạn vượt nước).
+      expect(
+        est.cost,
+        greaterThan(est.distance * TerrainRules.baseCostPerUnit),
+      );
       final r = MovementRules.advance(
         worldMap,
         from: from,
@@ -162,21 +170,62 @@ void main() {
         stamina: 100,
         maxDistance: 2000,
       );
-      expect(r.status, MoveStatus.blocked);
-      expect(r.blockedBy, TerrainType.water);
-      expect(worldMap.terrainAt(r.position), isNot(TerrainType.water));
-      expect(r.position.x, lessThan(1300));
-      // Vách đá.
+      expect(r.status, MoveStatus.arrived);
+      expect(r.position, to);
+      // Giá thật của từng bước nước/vách đá = base × crossingMultiplier, và đường mòn không giảm giá ở đó.
+      final water = find((t, p) => t == TerrainType.water);
+      final perUnit = worldMap.costPerUnitAt(water);
+      expect(
+        perUnit,
+        closeTo(
+          TerrainRules.baseCostPerUnit * TerrainRules.crossingMultiplier,
+          1e-12,
+        ),
+      );
+      expect(
+        TerrainRules.crossingMultiplier,
+        TerrainRules.crossingFactor *
+            TerrainRules.multiplier(TerrainType.mountain),
+      );
+      expect(
+        perUnit,
+        greaterThan(TerrainRules.costPerUnit(TerrainType.mountain)),
+      );
+      expect(
+        TerrainRules.costPerUnit(TerrainType.water, onTrail: true),
+        perUnit,
+      );
       final cliff = find((t, p) => t == TerrainType.cliff);
-      final r2 = MovementRules.advance(
+      expect(worldMap.costPerUnitAt(cliff), perUnit);
+      // Cầu rẻ hơn lội nước nhiều.
+      expect(
+        TerrainRules.costPerUnit(TerrainType.bridge),
+        lessThan(perUnit / 4),
+      );
+    });
+
+    test('đi ngoài đường (không có làn đường) tốn hơn đi trên đường mòn', () {
+      final plain = TerrainRules.costPerUnit(TerrainType.plain);
+      final trail = TerrainRules.costPerUnit(TerrainType.plain, onTrail: true);
+      expect(trail, lessThan(plain));
+      expect(trail, plain * TerrainRules.trailMultiplier);
+    });
+
+    test('thiếu thể lực để vượt sông: dừng đúng chỗ cạn, không vượt quá ngân sách, không nhảy sang bờ bên kia', () {
+      const from = WPoint(1000, 700);
+      final r = MovementRules.advance(
         worldMap,
-        from: WPoint(cliff.x - 700, cliff.y),
-        to: cliff,
-        stamina: 100,
+        from: from,
+        to: const WPoint(1700, 700),
+        stamina: 20,
         maxDistance: 5000,
       );
-      expect(r2.status, anyOf(MoveStatus.blocked, MoveStatus.exhausted));
-      expect(worldMap.isPassable(r2.position), isTrue);
+      expect(r.status, MoveStatus.exhausted);
+      expect(r.stamina, 0);
+      expect(r.position.x, lessThan(1700));
+      // Chi phí thật của đoạn đã đi đúng bằng thể lực tiêu hao.
+      final spent = MovementRules.estimate(worldMap, from, r.position);
+      expect(spent.cost, closeTo(20, 0.5));
     });
 
     test('đi qua cầu được và đi tiếp tới đích bên kia sông', () {
@@ -332,25 +381,37 @@ void main() {
       expect(c.travel.setDestination(WPoint(p.x + 100, p.y)), isNull);
     });
 
-    test('đích là sông/vách đá/ngoài bản đồ bị từ chối', () {
-      final water = find((t, p) => t == TerrainType.water);
-      expect(c.travel.setDestination(water), isNotNull);
+    test('đích là sông/vách đá nhận được (tốn thêm thể lực); ngoài bản đồ bị từ chối', () {
       expect(c.travel.setDestination(const WPoint(-10, -10)), isNotNull);
-      final cliff = find((t, p) => t == TerrainType.cliff);
-      expect(c.travel.setDestination(cliff), isNotNull);
       expect(c.travel.moving, isFalse);
+      final water = find((t, p) => t == TerrainType.water);
+      expect(c.travel.setDestination(water), isNull);
+      expect(c.travel.moving, isTrue);
+      c.travel.cancel();
+      final cliff = find((t, p) => t == TerrainType.cliff);
+      expect(c.travel.setDestination(cliff), isNull);
+      c.travel.cancel();
     });
 
-    test('đường bị chặn: dừng tại điểm chặn kèm thông báo', () {
+    test('qua sông khi thiếu thể lực: dừng giữa đường kèm thông báo "cạn thể lực"; đủ thì tới nơi', () {
       final h = c.state!.hero;
       h.position = const WPoint(1000, 700);
+      h.stamina = 20;
       expect(c.travel.setDestination(const WPoint(1700, 700)), isNull);
       for (var i = 0; i < 400 && c.travel.moving; i++) {
         c.travel.tick(0.05);
       }
-      expect(c.travel.status, MoveStatus.blocked);
-      expect(c.travel.notice, contains('chặn'));
-      expect(worldMap.isPassable(h.position), isTrue);
+      expect(c.travel.status, MoveStatus.exhausted);
+      expect(c.travel.notice, contains('cạn'));
+      expect(h.stamina, 0);
+      expect(h.position.x, lessThan(1700));
+      GameRules.tickDay(c.state!); // nghỉ ngơi hồi thể lực
+      expect(c.travel.setDestination(const WPoint(1700, 700)), isNull);
+      for (var i = 0; i < 400 && c.travel.moving; i++) {
+        c.travel.tick(0.05);
+      }
+      expect(c.travel.status, MoveStatus.arrived);
+      expect(h.position, const WPoint(1700, 700));
     });
   });
 
@@ -373,13 +434,16 @@ void main() {
       },
     );
 
-    test('thị trấn ở vùng chưa mở khóa không vào được dù đã tới nơi', () async {
-      final c = GameController(SaveRepository(MemoryStore()));
-      await c.newGame(seed: 5);
-      final town = worldMap.townById('n_keep')!;
-      c.state!.hero.position = town.position;
-      expect(c.enterTown('n_keep').ok, isFalse);
-    });
+    test(
+      'thành phố luôn mở: thị trấn ở vùng xa vẫn vào được khi đã tới nơi',
+      () async {
+        final c = GameController(SaveRepository(MemoryStore()));
+        await c.newGame(seed: 5);
+        final town = worldMap.townById('n_keep')!;
+        c.state!.hero.position = town.position;
+        expect(c.enterTown('n_keep').ok, isTrue);
+      },
+    );
 
     test(
       'rời thị trấn bằng cách đi ra xa thì hết trạng thái đang ở thành phố',
@@ -425,10 +489,14 @@ void main() {
         GameState.fromJson(inTown).hero.position,
         worldMap.townById('a_city')!.position,
       );
-      // Dữ liệu hero hỏng (đứng giữa sông) → mặc định, không làm hỏng save.
+      // Đứng giữa sông là hợp lệ (vượt sông giữa chừng rồi lưu): vị trí được giữ. Ngoài bản đồ → mặc định.
       final water = find((t, p) => t == TerrainType.water);
-      final bad = c.state!.toJson()
+      final inWater = c.state!.toJson()
         ..['hero'] = {'x': water.x, 'y': water.y, 'stamina': 10.0};
+      expect(GameState.fromJson(inWater).hero.position, water);
+      expect(GameState.fromJson(inWater).hero.stamina, 10.0);
+      final bad = c.state!.toJson()
+        ..['hero'] = {'x': -50.0, 'y': 20.0, 'stamina': 10.0};
       expect(GameState.fromJson(bad).hero.position, worldMap.start);
     });
   });
