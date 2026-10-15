@@ -1,3 +1,4 @@
+import 'package:app_rising_army/presentation/widgets/soldier/soldier_panel.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
@@ -12,10 +13,11 @@ import '../widgets/common.dart';
 /// đang chọn (chỉ số thật từ model) và nút Tuyển luôn nằm cố định, không bị danh sách che. Chọn một dòng chỉ đổi
 /// ứng viên đang xem — không điều hướng, không đổi state game. Luật tuyển (giá, chỗ, quán) giữ nguyên:
 /// `hire` / `hireAtTavern`.
+
 class RecruitScreen extends StatefulWidget {
   const RecruitScreen({super.key, this.vendorId});
 
-  /// Quán rượu đang chiêu mộ (UI thành phố); null = danh sách trong tab Tuyển mộ của shell.
+  /// Quán rượu đang chiêu mộ (UI thành phố); null = tab Tuyển mộ của shell.
   final String? vendorId;
 
   @override
@@ -32,8 +34,10 @@ class _RecruitScreenState extends State<RecruitScreen> {
     final d = Dims(context);
     final cap = GameRules.rosterCap(s);
     final candidates = s.candidates;
-    // Ứng viên đang xem đã được tuyển / sang ngày mới: quay về trạng thái chưa chọn.
+
+    // Nếu ứng viên không còn trong danh sách, quay về trạng thái chưa chọn.
     final sel = candidates.where((x) => x.id == _selected).firstOrNull;
+
     return Padding(
       padding: EdgeInsets.all(d.pad),
       child: Column(
@@ -79,17 +83,26 @@ class _RecruitScreenState extends State<RecruitScreen> {
                             itemCount: candidates.length,
                             separatorBuilder: (_, _) =>
                                 const SizedBox(height: 4),
-                            itemBuilder: (_, i) => _Row(
-                              candidate: candidates[i],
-                              selected: candidates[i].id == sel?.id,
-                              cost: GameRules.hireCost(candidates[i]),
-                              onTap: () =>
-                                  setState(() => _selected = candidates[i].id),
-                            ),
+                            itemBuilder: (_, i) {
+                              final candidate = candidates[i];
+
+                              return _Row(
+                                candidate: candidate,
+                                selected: candidate.id == sel?.id,
+                                cost: GameRules.hireCost(candidate),
+                                onTap: () {
+                                  setState(() {
+                                    _selected = candidate.id;
+                                  });
+                                },
+                              );
+                            },
                           ),
                         ),
                       ),
                       SizedBox(width: d.gap),
+
+                      // Chỉ dùng MỘT Expanded cho toàn bộ vùng chi tiết.
                       Expanded(
                         child: sel == null
                             ? const Panel(
@@ -103,10 +116,16 @@ class _RecruitScreenState extends State<RecruitScreen> {
                                   ),
                                 ),
                               )
-                            : _Detail(
+                            : Panel(
                                 key: ValueKey('tavern-detail-${sel.id}'),
-                                candidate: sel,
-                                vendorId: widget.vendorId,
+                                fill: true,
+                                padding: EdgeInsets.zero,
+                                child: SoldierPanel(
+                                  state: s,
+                                  soldier: sel,
+                                  controller: c,
+                                  recruitPreview: true,
+                                ),
                               ),
                       ),
                     ],

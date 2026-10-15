@@ -459,7 +459,15 @@ class GameRules {
         1,
         tavernMaxCandidateLevel,
       );
-      s.candidates.add(generateSoldier(s, level: lvl));
+
+      final candidate = generateSoldier(s, level: lvl);
+
+      if (!equipTavernCandidate(s, candidate)) {
+        // Không thêm ứng viên thiếu áo giáp hoặc vũ khí.
+        continue;
+      }
+
+      s.candidates.add(candidate);
     }
   }
 
@@ -482,25 +490,93 @@ class GameRules {
     return hire(s, candidateId);
   }
 
-  /// Hàm chọn trang bị khởi đầu cho một ô (tách ra để kiểm thử trường hợp catalog thiếu món).
+  /// Hàm chọn trang bị khởi đầu cho một ô.
+  /// Có thể thay thế trong test để kiểm tra trường hợp catalog thiếu món.
   static String? Function(Random, Slot, Soldier) hireGearPicker = HireGear.roll;
 
-  /// Áo giáp + vũ khí cho ứng viên [c], hoặc null nếu không chọn được đủ các ô bắt buộc. Chỉ điền ô CÒN TRỐNG (không
-  /// ghi đè đồ đã có), không đụng kho đồ, không dùng/tăng bộ đếm RNG của ván: mỗi ô dùng một dòng RNG dẫn xuất từ
-  /// (seed ván, id ứng viên, ô) nên cùng ván + cùng ứng viên luôn ra cùng đồ, dù mở lại Quán rượu hay thử lại.
+  /// Chọn áo giáp + vũ khí cho ứng viên [c].
+  ///
+  /// - Chỉ chọn cho các ô còn trống, không ghi đè trang bị đã có.
+  /// - Không thay đổi kho đồ.
+  /// - Không sử dụng hoặc tăng bộ đếm RNG của ván.
+  /// - Kết quả có thể tái lập theo seed ván, ID ứng viên và ô trang bị.
+  ///
+  /// Trả về null nếu không thể chọn đủ trang bị hợp lệ.
   static Map<Slot, String>? starterGearFor(GameState s, Soldier c) {
     final out = <Slot, String>{};
+
     for (final slot in HireGear.requiredSlots) {
-      if (c.equipped(slot) != null) continue;
-      final r = Random(
+      // Giữ nguyên trang bị ứng viên đã có.
+      final existingId = c.equipped(slot);
+
+      if (existingId != null) {
+        // Không chấp nhận ID không tồn tại hoặc sai loại ô.
+        final existingItem = itemDefs[existingId];
+
+        if (existingItem == null || existingItem.slot != slot) {
+          return null;
+        }
+
+        continue;
+      }
+
+      // RNG độc lập theo seed + ID ứng viên + ô trang bị.
+      // Không làm thay đổi rngCounter của GameState.
+      final random = Random(
         (s.seed * 1000003 + c.id * 7919 + (slot.index + 1) * 104729 + 17) &
             0x7fffffff,
       );
-      final id = hireGearPicker(r, slot, c);
-      if (id == null || itemDefs[id]?.slot != slot) return null;
+
+      final id = hireGearPicker(random, slot, c);
+
+      // Không chấp nhận trường hợp không có đồ hoặc sai loại trang bị.
+      if (id == null) return null;
+
+      final item = itemDefs[id];
+
+      if (item == null || item.slot != slot) {
+        return null;
+      }
+
       out[slot] = id;
     }
+
     return out;
+  }
+
+  /// Cấp đủ áo giáp và vũ khí cho ứng viên Quán rượu.
+  ///
+  /// Chỉ sửa ứng viên sau khi đã chọn thành công toàn bộ trang bị,
+  /// tránh trường hợp cấp được một món rồi thất bại ở món còn lại.
+  ///
+  /// Trả về false nếu không thể cấp đủ trang bị hợp lệ.
+  static bool equipTavernCandidate(GameState s, Soldier candidate) {
+    final gear = starterGearFor(s, candidate);
+
+    if (gear == null) {
+      return false;
+    }
+
+    // Chỉ gán sau khi đã xác nhận toàn bộ trang bị hợp lệ.
+    for (final slot in HireGear.requiredSlots) {
+      final id = candidate.equipped(slot) ?? gear[slot];
+
+      if (id == null) {
+        return false;
+      }
+
+      final item = itemDefs[id];
+
+      if (item == null || item.slot != slot) {
+        return false;
+      }
+    }
+
+    gear.forEach(candidate.setEquipped);
+
+    return HireGear.requiredSlots.every(
+      (slot) => candidate.equipped(slot) != null,
+    );
   }
 
   static ActionResult hire(GameState s, int candidateId) {
