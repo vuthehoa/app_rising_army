@@ -5,7 +5,6 @@ import '../../core/theme.dart';
 import '../../domain/catalog.dart';
 import '../../domain/models.dart';
 import '../../domain/rules.dart';
-import '../../domain/stats.dart';
 import '../widgets/art.dart';
 import '../widgets/common.dart';
 
@@ -125,6 +124,19 @@ class _RecruitScreenState extends State<RecruitScreen> {
                                   soldier: sel,
                                   controller: c,
                                   recruitPreview: true,
+                                  onRecruit: () {
+                                    final vendorId = widget.vendorId;
+
+                                    if (vendorId != null) {
+                                      c.hireAtTavern(vendorId, sel.id);
+                                    } else {
+                                      c.hire(sel.id);
+                                    }
+
+                                    setState(() {
+                                      _selected = null;
+                                    });
+                                  },
                                 ),
                               ),
                       ),
@@ -204,146 +216,6 @@ class _Row extends StatelessWidget {
             const Icon(Icons.paid, size: 13, color: Pal.gold),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _Detail extends StatelessWidget {
-  const _Detail({super.key, required this.candidate, this.vendorId});
-
-  final Soldier candidate;
-  final String? vendorId;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = ControllerScope.of(context);
-    final s = c.state!;
-    final cost = GameRules.hireCost(candidate);
-    final full = s.roster.length >= GameRules.rosterCap(s);
-    final dv = deriveStats(candidate);
-    String? lock;
-    if (full) {
-      lock = 'Doanh trại đã đầy';
-    } else if (!GameRules.canAfford(s, {Res.coins: cost})) {
-      lock = 'Thiếu ${cost - s.res[Res.coins]!} vàng';
-    }
-    Widget kv(String k, String v) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1.5),
-      child: Row(
-        children: [
-          Expanded(child: Text(k, style: const TextStyle(fontSize: 12))),
-          Text(v, style: const TextStyle(fontWeight: FontWeight.w800)),
-        ],
-      ),
-    );
-    return Panel(
-      fill: true,
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              key: const ValueKey('tavern-detail-scroll'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SoldierSprite.of(candidate, size: 84),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              candidate.name,
-                              key: const ValueKey('tavern-detail-name'),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 16,
-                              ),
-                            ),
-                            Text(
-                              '${roleNames[candidate.role]} • Cấp ${candidate.level}',
-                              style: const TextStyle(
-                                color: Pal.gold,
-                                fontSize: 12,
-                              ),
-                            ),
-                            if (candidate.trait != TraitId.none)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 3),
-                                child: Tooltip(
-                                  message: traitDefs[candidate.trait]!.desc,
-                                  child: Pill(
-                                    traitDefs[candidate.trait]!.name,
-                                    color: Pal.gold,
-                                  ),
-                                ),
-                              ),
-                            if (candidate.trait != TraitId.none)
-                              Text(
-                                traitDefs[candidate.trait]!.desc,
-                                style: const TextStyle(
-                                  color: Pal.dim,
-                                  fontSize: 10.5,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          children: [
-                            for (final st in Stat.values)
-                              kv(statNames[st]!, '${dv.stats[st]}'),
-                            kv('Công', '${dv.core.atk}'),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            kv('HP', '${dv.maxHp}'),
-                            kv('Thể lực', '${dv.maxEnergy}'),
-                            kv('Tinh thần', '${dv.maxMorale}'),
-                            kv('Sát thương', dv.damageRange),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          GameButton(
-            key: const ValueKey('tavern-hire'),
-            label: 'Tuyển • $cost vàng',
-            dense: true,
-            icon: Icons.paid,
-            lockedReason: lock,
-            onPressed: () => toast(
-              context,
-              vendorId == null
-                  ? c.hire(candidate.id)
-                  : c.hireAtTavern(vendorId!, candidate.id),
-            ),
-          ),
-        ],
       ),
     );
   }

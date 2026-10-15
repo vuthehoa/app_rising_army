@@ -16,6 +16,7 @@ import 'package:app_rising_army/presentation/widgets/rename_dialog.dart';
 import 'package:app_rising_army/presentation/widgets/soldier_condition_widgets.dart';
 import 'package:app_rising_army/presentation/widgets/stat_icon.dart';
 import 'package:flutter/material.dart';
+import 'package:app_rising_army/domain/economy.dart';
 
 const _label = TextStyle(color: Pal.dim, fontSize: 10);
 const _value = TextStyle(
@@ -31,11 +32,13 @@ class SoldierPanel extends StatelessWidget {
     required this.soldier,
     required this.controller,
     this.recruitPreview = false,
+    this.onRecruit,
   });
 
   final GameState state;
   final Soldier soldier;
   final GameController controller;
+  final VoidCallback? onRecruit;
 
   /// true: chỉ hiển thị thông tin nhân vật khi xem ứng viên ở Quán rượu.
   /// false: hiển thị đầy đủ giao diện lính trong doanh trại.
@@ -50,7 +53,9 @@ class SoldierPanel extends StatelessWidget {
     final trainStat = fac == null ? null : facilityDefs[fac.type]!.trains;
     final maxLevel = so.level >= maxSoldierLevel;
     final need = xpForNext(so.level);
-
+    final dailyUpkeep = UpkeepEconomy.forSoldiers(state.roster);
+    final dailyGold = dailyUpkeep[Res.coins] ?? 0;
+    final dailyFood = dailyUpkeep[Res.food] ?? 0;
     Widget? plusFor(MainStat stat) {
       if (recruitPreview || so.statPoints <= 0) return null;
 
@@ -69,25 +74,53 @@ class SoldierPanel extends StatelessWidget {
           // 1. TÊN NHÂN VẬT
           // =========================================================
           if (recruitPreview)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              decoration: BoxDecoration(
-                color: Pal.gold.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Pal.gold.withValues(alpha: 0.22)),
-              ),
-              child: Text(
-                so.name,
-                key: const ValueKey('soldier-name'),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Pal.text,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Pal.gold.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Pal.gold.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    child: Text(
+                      so.name,
+                      key: const ValueKey('soldier-name'),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Pal.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  key: const ValueKey('soldier-recruit-button'),
+                  onPressed: onRecruit,
+                  icon: const Icon(Icons.person_add_alt_1, size: 18),
+                  label: const Text('Chiêu mộ'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Pal.moss,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    minimumSize: const Size(0, 42),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             )
           else
             Row(
@@ -211,25 +244,41 @@ class SoldierPanel extends StatelessWidget {
                     '${so.morale}/${moraleCap(so)}',
                   ),
                 ),
+
                 if (!recruitPreview) ...[
+                  const SizedBox(height: 8),
                   Container(
-                    width: 1,
-                    height: 38,
-                    margin: const EdgeInsets.symmetric(horizontal: 5),
-                    color: Pal.lineStrong,
-                  ),
-                  Expanded(
-                    child: _Stat3(
-                      Icon(resIcons[Res.coins]!, size: 16, color: Pal.gold),
-                      'Vàng',
-                      '${state.res[Res.coins] ?? 0}',
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
                     ),
-                  ),
-                  Expanded(
-                    child: _Stat3(
-                      Icon(resIcons[Res.food]!, size: 16, color: Pal.moss),
-                      'Lương',
-                      '${state.res[Res.food] ?? 0}',
+                    decoration: BoxDecoration(
+                      color: Pal.panel,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Pal.lineStrong),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(resIcons[Res.coins]!, size: 14, color: Pal.gold),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$dailyGold',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(resIcons[Res.food]!, size: 14, color: Pal.moss),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$dailyFood',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -695,13 +744,8 @@ class _SoldierExpBar extends StatelessWidget {
 /// Icon phía trên, nhãn nhỏ, giá trị phía dưới; co lại nếu hẹp để không tràn/xuống dòng. [big]: HP nổi bật.
 
 class _Stat3 extends StatelessWidget {
-  const _Stat3(
-    this.icon,
-    this.label,
-    this.value, {
-    this.big = false,
-    this.flex = 2,
-  });
+  const _Stat3(this.icon, this.label, this.value, {this.big = false})
+    : flex = 2;
 
   final Widget icon;
   final String label;
@@ -958,7 +1002,7 @@ class _EquipCell extends StatelessWidget {
 
 /// Tóm tắt buff/debuff đang có từ trang bị (dữ liệu thật từ loadout). Chạm để xem danh sách trong popup.
 class _GearEffects extends StatelessWidget {
-  const _GearEffects({super.key, required this.soldier});
+  const _GearEffects({required this.soldier});
   final Soldier soldier;
 
   @override

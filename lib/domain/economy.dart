@@ -20,13 +20,13 @@ abstract final class StartingEconomy {
   /// Tài nguyên khởi đầu. Đủ xây MỘT công trình bất kỳ (kể cả đắt nhất: Lều cứu thương 150%) mà vẫn còn đủ xây
   /// thêm một công trình rẻ, và còn vàng nuôi quân vài ngày (xem test/economy_phase2_test.dart).
   static const resources = <Res, int>{
-    Res.food: 48,
-    Res.coins: 80,
-    Res.wood: 40,
-    Res.stone: 20,
-    Res.iron: 12,
-    Res.tools: 8,
-    Res.cloth: 8,
+    Res.food: 60,
+    Res.coins: 250,
+    Res.wood: 50,
+    Res.stone: 25,
+    Res.iron: 15,
+    Res.tools: 10,
+    Res.cloth: 10,
   };
 }
 

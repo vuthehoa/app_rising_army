@@ -355,7 +355,7 @@ class GameRules {
 
   static int level(GameState s, Building b) => s.buildings[b]!;
 
-  static int rosterCap(GameState s) => 6 + 4 * level(s, Building.barracks);
+  static int rosterCap(GameState s) => 20;
 
   static int statCap(Soldier s) => StatFormulas.statCap(s.level);
 
@@ -2662,13 +2662,35 @@ class GameRules {
 
     /// Chiến lợi phẩm của trận THẮNG, rút từ chính kẻ địch đã đánh (cấp, trang bị). Mỗi lần gọi
     /// `sendExpedition` giải quyết đúng một trận nên chỉ trao đúng một lần; trận thua/hòa không gọi.
+
     void collectLoot(List<Soldier> enemies) {
-      final loot = LootEconomy.roll(rng(s), enemies, s.res);
+      final random = rng(s);
+      final loot = LootEconomy.roll(random, enemies, s.res);
+
       grant(s, loot.res);
       for (final e in loot.res.entries) {
         res.gained[e.key] = (res.gained[e.key] ?? 0) + e.value;
       }
+
+      // Trao các món trang bị rơi ngẫu nhiên.
       for (final design in loot.items) {
+        res.itemsGained.add(EquipmentService.mint(s, design));
+      }
+
+      // Tính mức thưởng tối thiểu theo cấp cao nhất của địch.
+      final highestEnemyLevel = enemies.fold<int>(
+        1,
+        (highest, enemy) => max(highest, enemy.level),
+      );
+      final guaranteedItems = 2 + ((highestEnemyLevel - 1) ~/ 5);
+
+      // Bù trang bị còn thiếu. mint() sẽ lưu từng món vào s.inventory.
+      while (res.itemsGained.length < guaranteedItems) {
+        final difficulty = (s.tier + ((highestEnemyLevel - 1) ~/ 5)).clamp(
+          1,
+          5,
+        );
+        final design = rollGearDesign(random, difficulty);
         res.itemsGained.add(EquipmentService.mint(s, design));
       }
     }
